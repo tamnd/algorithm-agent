@@ -37,7 +37,6 @@ type command struct {
 // planned are the commands of spec 18.3 that are not built yet, with the milestone that builds them.
 var planned = map[string]string{
 	"audit":      "M0",
-	"lean":       "M0",
 	"oracle":     "M0",
 	"review":     "M0",
 	"bench":      "M2",
@@ -67,6 +66,7 @@ func init() {
 		{"status", "show the ladders of a node and what the next level needs", cmdStatus},
 		{"gen", "write the build tree of each language to build/lang", cmdGen},
 		{"test", "run the native tests and the shared cases", cmdTest},
+		{"lean", "build the Lean package and check its axioms: lean build", cmdLean},
 		{"viz", "bundle and check the scenes: viz build | check", cmdViz},
 		{"site", "render and preview the site: site build | serve | check", cmdSite},
 		{"version", "print the version", func([]string) error { fmt.Println("algo", ver()); return nil }},

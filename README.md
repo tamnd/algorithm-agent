@@ -32,6 +32,7 @@ Run these commands in a clone of tamnd/algorithm.
 | `algo status binary-search` | Shows the ladders of a node and what the next level needs. |
 | `algo gen -lang rust` | Writes the build tree of each language to `build/lang/<lang>/`: a copy of each implementation, its build files, `algo-test.sh` and the adapters. `SOURCES` maps each file back to the node. |
 | `algo test -unsafe-local binary-search` | Runs the native tests of the implementations, then the shared cases of each problem that the node solves. A wrong result names the case and the language. With `-changed origin/main`, only the implementations that a change touches run. With `-cache dir`, a result that passed is used again while algo, the toolchain, the files and the cases stay the same. |
+| `algo lean build` | Runs `lake build` in `lean/`, then AlgoExtract, which writes each declaration of the namespace `Algo` to `build/lean/decls.jsonl` with its type and its axioms. It fails if a declaration uses an axiom other than `propext`, `Classical.choice` and `Quot.sound`, such as `sorryAx`, and names the declaration. It also checks that each name of a `lean` field exists and has the right kind. `algo status` and the site read the file to compute the L ladder. |
 | `algo viz check` | Builds each scene and runs each preset two times. |
 | `algo site serve` | Renders the site and serves it at http://localhost:8150. It renders again when a file changes. |
 | `algo site check` | Renders the site and checks each internal link. |
@@ -52,6 +53,7 @@ The exit codes are: 0 for success, 1 when a check finds a problem, 2 for a usage
 | `node` | Reads the content tree. |
 | `check` | The audit rules of spec part 13. |
 | `status` | The ladders of a node. |
+| `formal` | Builds the Lean package, runs AlgoExtract (`formal/Extract.lean`), and checks the axiom policy. |
 | `contract` | Reads the contract and the shared cases of a problem, and decides if an output is right. |
 | `lang` | Writes the build trees, and runs the native tests and the adapters for each language. Errors show the node paths, not the paths of the tree. The JSON codecs of the adapters are in `lang/codec`, under the MIT licence. |
 | `viz` | Bundles the scenes with esbuild and checks them in a JavaScript runtime. |

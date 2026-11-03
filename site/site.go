@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tamnd/algorithm-agent/check"
+	"github.com/tamnd/algorithm-agent/formal"
 	"github.com/tamnd/algorithm-agent/katex"
 	"github.com/tamnd/algorithm-agent/markup"
 	"github.com/tamnd/algorithm-agent/node"
@@ -37,6 +38,7 @@ type Options struct {
 	Out      string // the output directory; Build empties it first
 	BaseURL  string // for example https://algorithm.tamnd.com
 	Results  string // the directory of the test results, build/results
+	Decls    string // the declarations of the Lean package, build/lean/decls.jsonl
 	SpecDir  string // a directory of the specification to publish at /spec/, or "" for the copy in the binary
 	Version  string // the version of algo
 	Commit   string // the commit of the content
@@ -109,6 +111,7 @@ type builder struct {
 	tpl     map[string]*template.Template
 	math    *katex.Renderer
 	results map[string]map[string]status.Test
+	decls   formal.Decls
 	scenes  map[string]viz.Report
 	status  map[string]status.Status
 	hue     map[string]int // by top area id
@@ -167,6 +170,9 @@ func build(c *node.Corpus, opt Options) (*Report, error) {
 	if b.results, err = status.LoadResults(opt.Results); err != nil {
 		return nil, err
 	}
+	if b.decls, err = status.LoadDecls(opt.Decls); err != nil {
+		return nil, err
+	}
 	if b.math, err = katex.New(nil); err != nil {
 		return nil, err
 	}
@@ -187,7 +193,7 @@ func build(c *node.Corpus, opt Options) (*Report, error) {
 		return nil, err
 	}
 	for _, n := range c.Nodes {
-		b.status[n.Slug] = status.Of(n, status.Env{Corpus: c, Results: b.results, VizChecked: b.vizChecked()})
+		b.status[n.Slug] = status.Of(n, status.Env{Corpus: c, Results: b.results, VizChecked: b.vizChecked(), Decls: b.decls})
 	}
 	steps := []func() error{b.nodes, b.home, b.areas, b.problems, b.kinds, b.gallery, b.languages, b.matrix, b.pages, b.spec, b.machine}
 	for _, f := range steps {

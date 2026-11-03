@@ -297,6 +297,7 @@ func cmdStatus(args []string) error {
 	f := newFlags("status", "[flags] <slug>")
 	root := f.String("root", ".", "the root of the content repository")
 	results := f.String("results", "build/results", "the directory of the test results")
+	decls := f.String("decls", "build/lean/decls.jsonl", "the declarations that algo lean build wrote")
 	asJSON := f.Bool("json", false, "print the status as JSON")
 	if err := parse(f, args); err != nil {
 		return err
@@ -316,7 +317,11 @@ func cmdStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	env := status.Env{Corpus: c, Results: res}
+	ds, err := status.LoadDecls(under(*root, *decls))
+	if err != nil {
+		return err
+	}
+	env := status.Env{Corpus: c, Results: res, Decls: ds}
 	if n.Scene != "" {
 		r := checkScene(c, n)
 		if r.Skipped == "" {
@@ -784,6 +789,7 @@ func cmdSite(args []string) error {
 	out := f.String("out", "build/site", "the output directory")
 	base := f.String("base", "https://algorithm.tamnd.com", "the base URL")
 	results := f.String("results", "build/results", "the directory of the test results")
+	decls := f.String("decls", "build/lean/decls.jsonl", "the declarations that algo lean build wrote")
 	spec := f.String("spec", "", "a directory of the specification to publish at /spec/")
 	commit := f.String("commit", "", "the commit of the content; the default comes from git")
 	minify := f.Bool("minify", false, "minify the scenes")
@@ -795,6 +801,7 @@ func cmdSite(args []string) error {
 		Out:      under(*root, *out),
 		BaseURL:  strings.TrimRight(*base, "/"),
 		Results:  filepath.Join(*root, *results),
+		Decls:    under(*root, *decls),
 		SpecDir:  *spec,
 		Version:  ver(),
 		Commit:   *commit,

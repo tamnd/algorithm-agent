@@ -17,6 +17,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/tamnd/algorithm-agent/formal"
 	"github.com/tamnd/algorithm-agent/node"
 )
 
@@ -109,6 +110,17 @@ type Env struct {
 	Results map[string]map[string]Test // slug, then lang
 	// VizChecked holds the scenes that passed `algo viz check` in this build, by slug, with the failures of the others.
 	VizChecked map[string][]string
+	// Decls holds the declarations that `algo lean build` extracted, or nil when it did not run.
+	Decls formal.Decls
+}
+
+// LoadDecls reads decls.jsonl. A missing file gives nil, which means that the Lean build did not run.
+func LoadDecls(path string) (formal.Decls, error) {
+	d, err := formal.Load(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return d, err
 }
 
 // LoadResults reads every build/results/*.json under dir. A missing dir gives no results.
@@ -194,8 +206,8 @@ func Of(n *node.Node, env Env) Status {
 
 var hNames = []string{"no proof", "sketch", "full proof", "reviewed proof"}
 
-func human(n *node.Node, env Env) Rung {
-	r := Rung{Max: 3}
+func human(n *node.Node, env Env) (r Rung) {
+	r = Rung{Max: 3}
 	defer func() { r.Label, r.Name = fmt.Sprintf("H%d", r.Level), hNames[r.Level] }()
 	if len(n.Proofs) == 0 {
 		r.Next = []string{"add a proof in proofs/ (06.5)"}
@@ -270,8 +282,8 @@ func sortedKeys[V any](m map[string]V) []string {
 
 var lNames = []string{"no Lean part", "spec and model", "correctness proved", "cost proved", "refinement proved"}
 
-func lean(n *node.Node, env Env) Rung {
-	r := Rung{Max: 4}
+func lean(n *node.Node, env Env) (r Rung) {
+	r = Rung{Max: 4}
 	defer func() { r.Label, r.Name = fmt.Sprintf("L%d", r.Level), lNames[r.Level] }()
 	mod := n.Lean["module"]
 	if mod == "" {
@@ -283,19 +295,81 @@ func lean(n *node.Node, env Env) Rung {
 		r.Next = []string{"the module " + mod + " does not exist"}
 		return r
 	}
-	if ok, why := reviewed(env.Corpus.Root, n.Tag, "lean-spec", file); !ok {
-		r.Next = []string{"a fidelity review of the spec: " + why}
+	if env.Decls == nil {
+		r.Next = []string{"run `algo lean build` to check the Lean part"}
+		return r
+	}
+	ds := env.Decls
+	var need []string
+	for _, f := range formal.CheckNode(n, ds) {
+		need = append(need, f.Where+": "+f.Msg)
+	}
+	model, spec := n.Lean["model"], n.Lean["spec"]
+	if model == "" {
+		need = append(need, "name the model in lean.model")
+	} else if d, ok := ds[model]; ok && !d.Computable {
+		need = append(need, "the model "+model+" is not computable (L07)")
+	}
+	if spec == "" {
+		need = append(need, "name the spec of the problem in lean.spec")
+	}
+	if n.Level == "core" {
+		if ok, why := reviewed(env.Corpus.Root, n.Tag, "lean-spec", file); !ok {
+			need = append(need, "a fidelity review of the spec: "+why)
+		}
+	}
+	if len(need) > 0 {
+		r.Next = need
 		return r
 	}
 	r.Level = 1
-	r.Next = []string{"L2 needs `algo lean build` and the axiom report, which are M0 work"}
+	proved := func(key, what string) (formal.Decl, string) {
+		name := n.Lean[key]
+		if name == "" {
+			return formal.Decl{}, "name the " + what + " in lean." + key
+		}
+		d := ds[name]
+		if bad := d.Disallowed(); len(bad) > 0 {
+			return d, name + " uses the axiom " + strings.Join(bad, ", ") + " (L03)"
+		}
+		return d, ""
+	}
+	d, why := proved("correct", "correctness theorem")
+	if why == "" && (!strings.Contains(d.Type, model) || !strings.Contains(d.Type, spec)) {
+		why = d.Decl + " does not state " + spec + " of " + model + " (L02)"
+	}
+	if why != "" {
+		r.Next = []string{why}
+		return r
+	}
+	r.Level = 2
+	if _, why := proved("cost", "cost theorem"); why != "" {
+		r.Next = []string{why}
+		return r
+	}
+	if !hasClassLemma(ds, mod) {
+		r.Next = []string{"a class lemma in " + mod + " that links the cost bound to its class with IsBigO (L05)"}
+		return r
+	}
+	r.Level = 3
+	r.Next = []string{"L4 needs the refinement theorem for the Rust implementation (L08), which is M3 work"}
 	return r
+}
+
+// hasClassLemma tells if the module has a theorem that states an asymptotic class with the standard axioms only.
+func hasClassLemma(ds formal.Decls, mod string) bool {
+	for _, d := range ds {
+		if d.Module == mod && d.Kind == "theorem" && len(d.Disallowed()) == 0 && (strings.Contains(d.Type, "=O[") || strings.Contains(d.Type, "=Θ[") || strings.Contains(d.Type, "IsBigO") || strings.Contains(d.Type, "IsTheta")) {
+			return true
+		}
+	}
+	return false
 }
 
 var iNames = []string{"not checked yet", "shared cases pass", "differential and mutation", "clean and measured", "reviewed"}
 
-func impl(n *node.Node, im node.Impl, env Env) Rung {
-	r := Rung{Max: 4}
+func impl(n *node.Node, im node.Impl, env Env) (r Rung) {
+	r = Rung{Max: 4}
 	defer func() { r.Label, r.Name = fmt.Sprintf("I%d", r.Level), iNames[r.Level] }()
 	t, ran := env.Results[n.Slug][im.Lang]
 	switch {
@@ -344,8 +418,8 @@ func firstLine(s string) string {
 
 var vNames = []string{"none", "static frames", "interactive and checked", "reviewed"}
 
-func visual(n *node.Node, env Env) Rung {
-	r := Rung{Max: 3}
+func visual(n *node.Node, env Env) (r Rung) {
+	r = Rung{Max: 3}
 	defer func() { r.Label, r.Name = fmt.Sprintf("V%d", r.Level), vNames[r.Level] }()
 	figs, _ := filepath.Glob(filepath.Join(n.Dir, "figures", "*.svg"))
 	if n.Scene == "" && len(figs) == 0 {
@@ -430,8 +504,8 @@ type need struct {
 }
 
 // Writing computes the W ladder from the sections, their content and the links (spec 06.8).
-func Writing(n *node.Node, env Env) Rung {
-	r := Rung{Max: 5}
+func Writing(n *node.Node, env Env) (r Rung) {
+	r = Rung{Max: 5}
 	defer func() { r.Label, r.Name = fmt.Sprintf("W%d", r.Level), wNames[r.Level] }()
 	has := func(h string) func() bool {
 		return func() bool { return Section(n.Body, h) != "" }
