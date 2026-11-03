@@ -66,6 +66,10 @@ make site     # render testdata/corpus into build/site
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. To report a security problem, read [SECURITY.md](SECURITY.md).
 
+## Roadmap
+
+The work is in six milestones, M0 to M5, from November 2026 to December 2028. [Spec 19](https://algorithm.tamnd.com/spec/19-milestones/) gives the goal and the exit criteria of each one. The [milestones](https://github.com/tamnd/algorithm-agent/milestones) list the open issues. Issues with the label `good first issue` are small and clear.
+
 ## Licence
 
 The code is under the [Apache License 2.0](LICENSE). The scene package `viz/packages/core` is under the MIT licence, so scenes in the content repository can use it. The parts from other projects are listed in [THIRD_PARTY.md](THIRD_PARTY.md).
