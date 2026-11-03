@@ -185,3 +185,29 @@ func TestLRules(t *testing.T) {
 		t.Errorf("L01 for a missing module = %q", got)
 	}
 }
+
+func TestS08(t *testing.T) {
+	const ignore = "nodes/searching/sequential-and-binary-search/binary-search/impl/python/mutants.ignore"
+	tests := []struct {
+		name, text, want string
+	}{
+		{"none", "", ""},
+		{"no reason", "binary_search.py:9: relational < -> <=\n", "the reason why it cannot change the output"},
+		{"stale", "binary_search.py:99: relational < -> <= # never equal\n", "names no mutant of the sample"},
+		{"one", "binary_search.py:19: constant 2 -> 3 # a third of the range also halves the search\n", ""},
+		{"too many", "binary_search.py:19: constant 2 -> 3 # a third also works\nbinary_search.py:19: constant 2 -> 1 # x\n", "the list has 2 of 21 mutants"},
+	}
+	for _, tc := range tests {
+		files := map[string]string{}
+		if tc.text != "" {
+			files[ignore] = "# The equivalent mutants.\n" + tc.text
+		}
+		got := fired(Run(fixture(t, files), Options{}), "S08")
+		switch {
+		case tc.want == "" && len(got) > 0:
+			t.Errorf("%s: %v, want no finding", tc.name, got)
+		case tc.want != "" && (len(got) == 0 || !strings.Contains(got[0], tc.want)):
+			t.Errorf("%s: %v, want a finding with %q", tc.name, got, tc.want)
+		}
+	}
+}

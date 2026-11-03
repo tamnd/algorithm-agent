@@ -26,6 +26,8 @@ func TestImplLadder(t *testing.T) {
 		{"failure", Test{Pass: true, Shared: []Shared{{Problem: "sorting-problem", Cases: 18, Passed: 17, Failures: []CaseFailure{{Case: "basic/example"}}}}}, 0},
 		{"native fail", Test{Pass: false, Shared: []Shared{{Problem: "sorting-problem", Cases: 18, Passed: 18}}}, 0},
 		{"no shared", Test{Pass: true}, 0},
+		{"diff and mutation", Test{Pass: true, Shared: []Shared{{Problem: "sorting-problem", Cases: 18, Passed: 18}}, Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 9}}, Mutation: &Mutation{Mutants: 20, Killed: 18, Ignored: 1}}, 2},
+		{"diff fails", Test{Pass: true, Shared: []Shared{{Problem: "sorting-problem", Cases: 18, Passed: 18}}, Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 8, Failures: []CaseFailure{{Case: "x"}}}}, Mutation: &Mutation{Mutants: 20, Killed: 20}}, 1},
 	}
 	for _, tc := range tests {
 		env := Env{Results: map[string]map[string]Test{"merge-sort": {"c": tc.test}}}
@@ -45,10 +47,16 @@ func TestDiffNext(t *testing.T) {
 		{"no run", Test{}, "did not run in this build"},
 		{"error", Test{Diff: []Diff{{Problem: "sorting-problem", Error: "the adapter does not build\nmore"}}}, "did not run: the adapter does not build"},
 		{"failure", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 8, Failures: []CaseFailure{{Case: "small-uniform-n4-s1-0"}}}}}, "fails on small-uniform-n4-s1-0 (I03)"},
-		{"pass", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 9}}}, "mutation score"},
+		{"no mutation", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 9}}}, "the mutation run did not run"},
+		{"low score", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 9}}, Mutation: &Mutation{Mutants: 22, Killed: 17, Ignored: 1, Survivors: []string{"a.py:3: relational < -> <="}}}, "kill 17 of 21 mutants (81%)"},
+		{"lower score", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 9}}, Mutation: &Mutation{Mutants: 20, Killed: 16, Survivors: []string{"a.py:3: relational < -> <="}}}, "add a case that kills a.py:3"},
+		{"mutation error", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 9}}, Mutation: &Mutation{Error: "the code fails"}}, "did not run: the code fails"},
 	}
 	for _, tc := range tests {
 		got := diffNext(tc.test)
+		if got == nil {
+			got = mutationNext(tc.test)
+		}
 		if len(got) != 1 || !strings.Contains(got[0], tc.want) {
 			t.Errorf("%s: %q, want a message with %q", tc.name, got, tc.want)
 		}

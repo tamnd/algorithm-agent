@@ -414,16 +414,17 @@ func cmdTest(args []string) error {
 	keep := f.Bool("keep", false, "keep the temporary directories")
 	changed := f.String("changed", "", "test only the implementations that changed since this git ref, for example origin/main (09.8)")
 	cacheDir := f.String("cache", "", "keep the results of passing tests in this directory, and reuse them while the inputs stay the same")
-	kind := f.String("kind", "cases", "cases runs the native tests and the shared cases; diff runs the differential test against the oracle on generated inputs (09.5)")
+	kind := f.String("kind", "cases", "cases runs the native tests and the shared cases; diff runs the differential test against the oracle on generated inputs (09.5); mutate runs the mutation test (09.6)")
+	maxMutants := f.Int("mutants", 150, "with -kind mutate, the largest number of mutants of one file, sampled with a fixed seed; 0 runs all")
 	var d diffFlags
-	f.StringVar(&d.classes, "classes", "tiny,small,medium", "with -kind diff, the size classes to generate")
-	f.StringVar(&d.seeds, "seeds", "", "with -kind diff, a comma list of seeds; the default is seeds.pr of generated.yaml")
+	f.StringVar(&d.classes, "classes", "tiny,small,medium", "with -kind diff or mutate, the size classes to generate")
+	f.StringVar(&d.seeds, "seeds", "", "with -kind diff or mutate, a comma list of seeds; the default is seeds.pr of generated.yaml")
 	f.BoolVar(&d.write, "write-regress", false, "with -kind diff, add each shrunk failure to cases/regress.jsonl of the problem")
 	if err := parse(f, args); err != nil {
 		return err
 	}
-	if *kind != "cases" && *kind != "diff" {
-		return usageError{"-kind is cases or diff, not " + *kind}
+	if *kind != "cases" && *kind != "diff" && *kind != "mutate" {
+		return usageError{"-kind is cases, diff or mutate, not " + *kind}
 	}
 	if *changed != "" && f.NArg() > 0 {
 		return usageError{"give slugs or -changed, not both"}
@@ -461,8 +462,11 @@ func cmdTest(args []string) error {
 		fmt.Fprintf(os.Stderr, "the tests run in %s containers with the images of %s\n", box.Engine, *images)
 	}
 	problems := contractsOf(c)
-	if *kind == "diff" {
+	if *kind == "diff" || *kind == "mutate" {
 		d.root, d.box, d.out = c.Root, box, under(*root, *out)
+		if *kind == "mutate" {
+			return runMutate(r, nodes, want, problems, d, *maxMutants)
+		}
 		return runDiff(r, nodes, want, problems, d)
 	}
 	var aff affected

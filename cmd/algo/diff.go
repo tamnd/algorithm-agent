@@ -33,80 +33,100 @@ type problemInputs struct {
 	err  error
 }
 
-// runDiff runs the differential test of each implementation against the oracle of each problem that it solves, on the generated inputs (spec 09.5). It shrinks each failure, writes the regression cases to build/regress/<problem>.jsonl, and with -write-regress also to cases/regress.jsonl of the problem.
-func runDiff(r *lang.Runner, nodes []*node.Node, want map[string]bool, problems func(*node.Node) []*sharedCases, d diffFlags) error {
-	classes := strings.Split(d.classes, ",")
-	for _, cl := range classes {
+// inputCache makes the generated inputs of each problem once, for all the implementations.
+type inputCache struct {
+	d       diffFlags
+	classes []string
+	seeds   []int
+	inputs  map[string]*problemInputs
+	closers []func()
+}
+
+func newInputCache(d diffFlags) (*inputCache, error) {
+	c := &inputCache{d: d, classes: strings.Split(d.classes, ","), inputs: map[string]*problemInputs{}}
+	for _, cl := range c.classes {
 		if !contains(contract.ClassOrder, cl) {
-			return usageError{fmt.Sprintf("the class %q is not one of %s", cl, strings.Join(contract.ClassOrder, ", "))}
+			return nil, usageError{fmt.Sprintf("the class %q is not one of %s", cl, strings.Join(contract.ClassOrder, ", "))}
 		}
 	}
-	var seeds []int
 	for _, s := range strings.Split(d.seeds, ",") {
 		if s = strings.TrimSpace(s); s == "" {
 			continue
 		}
 		n, err := strconv.Atoi(s)
 		if err != nil {
-			return usageError{"-seeds is a comma list of integers"}
+			return nil, usageError{"-seeds is a comma list of integers"}
 		}
-		seeds = append(seeds, n)
+		c.seeds = append(c.seeds, n)
 	}
-	inputs := map[string]*problemInputs{}
-	var closers []func()
-	defer func() {
-		for _, c := range closers {
-			c()
-		}
-	}()
-	get := func(k *contract.Contract) *problemInputs {
-		if pi, ok := inputs[k.Problem]; ok {
-			return pi
-		}
-		pi := &problemInputs{}
-		inputs[k.Problem] = pi
-		g, err := k.LoadGenerated()
-		if err != nil {
-			pi.err = err
-			return pi
-		}
-		if g == nil {
-			pi.skip = "the problem has no cases/generated.yaml"
-			return pi
-		}
-		if d.box != nil {
-			if err := d.box.Ready("python"); err != nil {
-				pi.err = fmt.Errorf("the generators and the oracle run in the Python image: %w", err)
-				return pi
-			}
-		}
-		o, err := k.StartOracle(lang.CheckerWrap(d.box, k))
-		if errors.Is(err, contract.ErrNoOracle) {
-			pi.skip = err.Error()
-			return pi
-		}
-		if err != nil {
-			pi.err = err
-			return pi
-		}
-		closers = append(closers, o.Close)
-		gen, err := k.StartGenerator(lang.CheckerWrap(d.box, k))
-		if err != nil {
-			pi.err = err
-			return pi
-		}
-		closers = append(closers, gen.Close)
-		ss := seeds
-		if len(ss) == 0 {
-			ss = g.Seeds.PR
-		}
-		start := time.Now()
-		pi.in, pi.err = lang.MakeInputs(k, g, gen, o, g.Plan(k, classes, ss))
-		if pi.err == nil {
-			fmt.Printf("%s: %d generated inputs with the oracle %s (%d ms)\n", k.Problem, len(pi.in.Cases), o.File, time.Since(start).Milliseconds())
-		}
+	return c, nil
+}
+
+// Close stops the oracles and the generators.
+func (c *inputCache) Close() {
+	for _, f := range c.closers {
+		f()
+	}
+}
+
+// get gives the generated inputs of the problem, with the oracle output as expect.
+func (c *inputCache) get(k *contract.Contract) *problemInputs {
+	if pi, ok := c.inputs[k.Problem]; ok {
 		return pi
 	}
+	pi := &problemInputs{}
+	c.inputs[k.Problem] = pi
+	g, err := k.LoadGenerated()
+	if err != nil {
+		pi.err = err
+		return pi
+	}
+	if g == nil {
+		pi.skip = "the problem has no cases/generated.yaml"
+		return pi
+	}
+	if c.d.box != nil {
+		if err := c.d.box.Ready("python"); err != nil {
+			pi.err = fmt.Errorf("the generators and the oracle run in the Python image: %w", err)
+			return pi
+		}
+	}
+	o, err := k.StartOracle(lang.CheckerWrap(c.d.box, k))
+	if errors.Is(err, contract.ErrNoOracle) {
+		pi.skip = err.Error()
+		return pi
+	}
+	if err != nil {
+		pi.err = err
+		return pi
+	}
+	c.closers = append(c.closers, o.Close)
+	gen, err := k.StartGenerator(lang.CheckerWrap(c.d.box, k))
+	if err != nil {
+		pi.err = err
+		return pi
+	}
+	c.closers = append(c.closers, gen.Close)
+	ss := c.seeds
+	if len(ss) == 0 {
+		ss = g.Seeds.PR
+	}
+	start := time.Now()
+	pi.in, pi.err = lang.MakeInputs(k, g, gen, o, g.Plan(k, c.classes, ss))
+	if pi.err == nil {
+		fmt.Printf("%s: %d generated inputs with the oracle %s (%d ms)\n", k.Problem, len(pi.in.Cases), o.File, time.Since(start).Milliseconds())
+	}
+	return pi
+}
+
+// runDiff runs the differential test of each implementation against the oracle of each problem that it solves, on the generated inputs (spec 09.5). It shrinks each failure, writes the regression cases to build/regress/<problem>.jsonl, and with -write-regress also to cases/regress.jsonl of the problem.
+func runDiff(r *lang.Runner, nodes []*node.Node, want map[string]bool, problems func(*node.Node) []*sharedCases, d diffFlags) error {
+	cache, err := newInputCache(d)
+	if err != nil {
+		return err
+	}
+	defer cache.Close()
+	get := cache.get
 	failed := 0
 	byLang := map[string]*status.Results{}
 	record := func(n *node.Node, l string, dr status.Diff) {

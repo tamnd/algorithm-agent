@@ -16,6 +16,7 @@ import (
 
 	"github.com/tamnd/algorithm-agent/contract"
 	"github.com/tamnd/algorithm-agent/formal"
+	"github.com/tamnd/algorithm-agent/mutate"
 	"github.com/tamnd/algorithm-agent/node"
 	"github.com/tamnd/algorithm-agent/status"
 )
@@ -74,6 +75,7 @@ var Rules = map[string]string{
 	"S04": "edge.jsonl has at least one case for each class of edge_classes",
 	"S05": "each generator is a Python file under generators/ that uses only the rng it gets",
 	"S06": "the contract of each core problem is reviewed by a person, bound to its hash",
+	"S08": "mutants.ignore of an implementation lists at most 5% of its mutants, each with a reason, and each entry names a mutant of the sample",
 	"S09": "a flaky case names its open issue",
 	"L01": "each Lean name in the front matter exists in decls.jsonl with the expected kind",
 	"L02": "the correctness theorem mentions the spec and the model",
@@ -504,6 +506,30 @@ func Markers(content string) []string {
 	return out
 }
 
+// mutantsIgnore checks mutants.ignore of the implementation (rule S08): each entry has a reason and names a mutant of the sample, and the list has at most 5% of the mutants.
+func (r *run) mutantsIgnore(im node.Impl) {
+	var file *node.File
+	for i := range im.Files {
+		if im.Files[i].Name == mutate.IgnoreFile {
+			file = &im.Files[i]
+		}
+	}
+	if file == nil {
+		return
+	}
+	set, err := mutate.Of(im, mutate.MaxPerFile)
+	if err != nil {
+		r.add("S08", Block, file.Path, 0, "%v", err)
+		return
+	}
+	for _, e := range set.Stale {
+		r.add("S08", Block, file.Path, e.Line, "the entry names no mutant of the sample; the code changed, or the id is not as algo test -kind mutate writes it: %s", e.ID)
+	}
+	if k, all := set.Ignored(), len(set.Mutants); float64(k) > mutate.MaxIgnored*float64(all) {
+		r.add("S08", Block, file.Path, 0, "the list has %d of %d mutants, and at most 5%% can be marked equivalent (09.6); add tests that kill some of them", k, all)
+	}
+}
+
 func (r *run) impls(n *node.Node) {
 	ids, _ := PseudoIDs(n.Body)
 	all := map[string]bool{}
@@ -517,10 +543,14 @@ func (r *run) impls(n *node.Node) {
 		if lang == nil {
 			r.add("I12", Block, n.Rel+"/impl/"+im.Lang, 0, "the language %q is not in registers/languages.yaml", im.Lang)
 		}
+		r.mutantsIgnore(im)
 		seen := map[string]bool{}
 		for _, f := range im.Files {
 			if node.IsBuildFile(f.Name) {
 				r.add("I15", Block, f.Path, 0, "%s is a build file; algo gen writes it in build/lang (08.5)", path.Base(f.Name))
+			}
+			if f.Name == mutate.IgnoreFile {
+				continue
 			}
 			if !strings.Contains(firstLines(f.Content, 4), "SPDX-License-Identifier: MIT") {
 				r.add("I10", Block, f.Path, 1, "the file does not start with the SPDX header (08.11)")

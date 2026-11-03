@@ -67,6 +67,8 @@ type Runner struct {
 	Box *Sandbox
 	// TempDir holds the build trees. The default is the temporary directory of the system. A sandbox needs a directory that the container engine can mount.
 	TempDir string
+	// CaseTimeout is the longest time of one case. The default is the constant CaseTimeout. The mutation run uses a shorter time, because a mutant that loops forever is common.
+	CaseTimeout time.Duration
 }
 
 // Available tells if the language can run with this runner. In a sandbox, the image replaces the tools of this machine.

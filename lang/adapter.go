@@ -226,11 +226,15 @@ func (ss *Session) Run(c contract.Case) (json.RawMessage, string, error) {
 		}
 		ss.p = p
 	}
-	line, err := ss.p.Call(map[string]any{"op": "call", "id": c.ID(), "T": c.Type(), "args": c.Args}, CaseTimeout)
+	limit := CaseTimeout
+	if ss.r.CaseTimeout > 0 {
+		limit = ss.r.CaseTimeout
+	}
+	line, err := ss.p.Call(map[string]any{"op": "call", "id": c.ID(), "T": c.Type(), "args": c.Args}, limit)
 	if err != nil {
 		reason := "the adapter crashed: " + err.Error()
 		if errors.Is(err, jsonl.ErrTimeout) {
-			reason = fmt.Sprintf("no result in %s", CaseTimeout)
+			reason = fmt.Sprintf("no result in %s", limit)
 		}
 		ss.kill()
 		return nil, cut(reason, 1500), nil

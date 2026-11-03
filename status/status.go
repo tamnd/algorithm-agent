@@ -53,6 +53,31 @@ type Test struct {
 	Shared []Shared `json:"shared,omitempty"`
 	// Diff holds the results of the differential run of each problem that the node solves (spec 09.5). It comes from the file <lang>.diff.json.
 	Diff []Diff `json:"diff,omitempty"`
+	// Mutation is the result of the mutation run (spec 09.6). It comes from the file <lang>.mutate.json.
+	Mutation *Mutation `json:"mutation,omitempty"`
+}
+
+// Mutation is the result of the mutation run of one implementation.
+type Mutation struct {
+	// Mutants is the number of mutants of the sample, Ignored the number of them in mutants.ignore, and Killed the number of the others that the tests kill.
+	Mutants int `json:"mutants"`
+	Killed  int `json:"killed"`
+	Ignored int `json:"ignored,omitempty"`
+	// Survivors are the ids of the mutants that no test kills, as mutants.ignore writes them.
+	Survivors []string `json:"survivors,omitempty"`
+	// Error is set when the run could not start, or when the code fails its tests with no mutant.
+	Error string `json:"error,omitempty"`
+}
+
+// MinScore is the mutation score of rule I04.
+const MinScore = 0.85
+
+// Score is the killed mutants divided by the mutants that are not ignored. A run with no mutant to count has the score 1.
+func (m Mutation) Score() float64 {
+	if m.Mutants-m.Ignored <= 0 {
+		return 1
+	}
+	return float64(m.Killed) / float64(m.Mutants-m.Ignored)
 }
 
 // Diff is the result of the differential run of one problem on one implementation.
@@ -106,7 +131,7 @@ type CaseFailure struct {
 type Results struct {
 	Lang    string `json:"lang"`
 	Version string `json:"version,omitempty"`
-	// Kind is "diff" for the file <lang>.diff.json of the differential run, and empty for the native tests and the shared cases.
+	// Kind is "diff" for the file <lang>.diff.json of the differential run, "mutate" for the file <lang>.mutate.json of the mutation run, and empty for the native tests and the shared cases.
 	Kind  string `json:"kind,omitempty"`
 	Tests []Test `json:"tests"`
 }
@@ -156,7 +181,7 @@ func LoadResults(dir string) (map[string]map[string]Test, error) {
 		if err := json.Unmarshal(b, &r); err != nil {
 			return nil, fmt.Errorf("%s: %w", f, err)
 		}
-		if r.Kind == "diff" {
+		if r.Kind == "diff" || r.Kind == "mutate" {
 			diffs = append(diffs, r)
 			continue
 		}
@@ -167,13 +192,19 @@ func LoadResults(dir string) (map[string]map[string]Test, error) {
 			out[t.Slug][t.Lang] = t
 		}
 	}
-	// The differential runs add to the results of the native tests. A differential run without native results does not count as a test run.
+	// The differential and the mutation runs add to the results of the native tests. A run without native results does not count as a test run.
 	for _, r := range diffs {
 		for _, t := range r.Tests {
-			if base, ok := out[t.Slug][t.Lang]; ok {
-				base.Diff = t.Diff
-				out[t.Slug][t.Lang] = base
+			base, ok := out[t.Slug][t.Lang]
+			if !ok {
+				continue
 			}
+			if r.Kind == "diff" {
+				base.Diff = t.Diff
+			} else {
+				base.Mutation = t.Mutation
+			}
+			out[t.Slug][t.Lang] = base
 		}
 	}
 	return out, nil
@@ -437,12 +468,38 @@ func impl(n *node.Node, im node.Impl, env Env) (r Rung) {
 		}
 	}
 	if r.Level == 1 {
-		r.Next = append(r.Next, diffNext(t)...)
+		next := diffNext(t)
+		if next == nil {
+			next = mutationNext(t)
+		}
+		if next == nil {
+			r.Level = 2
+			next = []string{"I3 needs the formatter, the linter, the @line markers and the complexity check (09.7), which are not checked yet"}
+		}
+		r.Next = append(r.Next, next...)
 	}
 	return r
 }
 
-// diffNext says what an implementation at I1 needs for I2: a differential run that passes on each input (rule I03), then the mutation score (rule I04).
+// mutationNext says what an implementation whose differential run passes needs for I2: a mutation score of at least 85% (rule I04). It gives nil when the score is enough.
+func mutationNext(t Test) []string {
+	m := t.Mutation
+	switch {
+	case m == nil:
+		return []string{"I2 needs a mutation score of at least 85% (09.6, I04); the mutation run did not run in this build"}
+	case m.Error != "":
+		return []string{"the mutation run did not run: " + firstLine(m.Error)}
+	case m.Score() < MinScore:
+		msg := fmt.Sprintf("the tests kill %d of %d mutants (%.0f%%), and I2 needs 85%% (I04)", m.Killed, m.Mutants-m.Ignored, 100*m.Score())
+		if len(m.Survivors) > 0 {
+			msg += "; add a case that kills " + m.Survivors[0]
+		}
+		return []string{msg}
+	}
+	return nil
+}
+
+// diffNext says what an implementation at I1 needs for I2 from the differential run: a run that passes on each input (rule I03). It gives nil when the run passes.
 func diffNext(t Test) []string {
 	if len(t.Diff) == 0 {
 		return []string{"I2 needs the differential run on the inputs of cases/generated.yaml (09.5); it did not run in this build"}
@@ -456,10 +513,7 @@ func diffNext(t Test) []string {
 			out = append(out, fmt.Sprintf("the differential run of %s fails on %s (I03); add the shrunk case to cases/regress.jsonl and fix the code", d.Problem, d.Failures[0].Case))
 		}
 	}
-	if len(out) > 0 {
-		return out
-	}
-	return []string{"the differential run passes; I2 also needs a mutation score of at least 85% (09.6, I04), which is not measured yet"}
+	return out
 }
 
 func firstLine(s string) string {
