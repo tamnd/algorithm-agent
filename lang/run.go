@@ -119,16 +119,9 @@ func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 	if !r.Keep {
 		defer os.RemoveAll(dir)
 	}
-	for _, f := range im.Files {
-		dst := filepath.Join(dir, filepath.FromSlash(f.Name))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			t.Output = err.Error()
-			return t
-		}
-		if err := os.WriteFile(dst, []byte(f.Content), 0o644); err != nil {
-			t.Output = err.Error()
-			return t
-		}
+	if err := stage(dir, im, true); err != nil {
+		t.Output = err.Error()
+		return t
 	}
 	cmds, err := rc.Run(r, dir, n, im)
 	if err != nil {
@@ -144,7 +137,7 @@ func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 		cmd := exec.CommandContext(ctx, c[0], c[1:]...)
 		cmd.Dir = dir
 		cmd.Stdout, cmd.Stderr = &out, &out
-		cmd.Env = append(os.Environ(), "NO_COLOR=1", "CARGO_TERM_COLOR=never", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_NOLOGO=1", "PYTHONDONTWRITEBYTECODE=1")
+		cmd.Env = append(os.Environ(), testEnv...)
 		if err := cmd.Run(); err != nil {
 			t.Pass = false
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -316,21 +309,30 @@ func java(r *Runner, dir string, _ *node.Node, im node.Impl) ([][]string, error)
 	return [][]string{args, run}, nil
 }
 
-func kotlin(r *Runner, dir string, _ *node.Node, im node.Impl) ([][]string, error) {
-	jar, err := r.junit()
-	if err != nil {
-		return nil, err
-	}
+// kotlinStdlib returns the path of kotlin-stdlib.jar of the kotlinc on the PATH.
+func kotlinStdlib() (string, error) {
 	kc, err := exec.LookPath("kotlinc")
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if real, err := filepath.EvalSymlinks(kc); err == nil {
 		kc = real
 	}
 	stdlib := filepath.Join(filepath.Dir(filepath.Dir(kc)), "lib", "kotlin-stdlib.jar")
 	if _, err := os.Stat(stdlib); err != nil {
-		return nil, fmt.Errorf("kotlin: no kotlin-stdlib.jar next to kotlinc: %w", err)
+		return "", fmt.Errorf("kotlin: no kotlin-stdlib.jar next to kotlinc: %w", err)
+	}
+	return stdlib, nil
+}
+
+func kotlin(r *Runner, dir string, _ *node.Node, im node.Impl) ([][]string, error) {
+	jar, err := r.junit()
+	if err != nil {
+		return nil, err
+	}
+	stdlib, err := kotlinStdlib()
+	if err != nil {
+		return nil, err
 	}
 	args := append([]string{"kotlinc", "-Werror", "-cp", jar, "-d", "out"}, all(im, ".kt")...)
 	cp := "out" + string(os.PathListSeparator) + stdlib
@@ -354,13 +356,21 @@ const csproj = `<Project Sdk="Microsoft.NET.Sdk">
 </Project>
 `
 
-func csharp(_ *Runner, dir string, _ *node.Node, _ node.Impl) ([][]string, error) {
+// dotnetMajor returns the major version of the .NET SDK, such as 10.
+func dotnetMajor() (string, error) {
 	out, err := exec.Command("dotnet", "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	major, _, _ := strings.Cut(strings.TrimSpace(string(out)), ".")
+	return major, nil
+}
+
+func csharp(_ *Runner, dir string, _ *node.Node, _ node.Impl) ([][]string, error) {
+	major, err := dotnetMajor()
 	if err != nil {
 		return nil, err
 	}
-	v := strings.TrimSpace(string(out))
-	major, _, _ := strings.Cut(v, ".")
 	if err := write(dir, "Impl.Tests.csproj", fmt.Sprintf(csproj, major+".0")); err != nil {
 		return nil, err
 	}

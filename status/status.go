@@ -42,11 +42,49 @@ type Status struct {
 
 // Test is the result of the native tests of one implementation, as `algo test` writes it.
 type Test struct {
-	Slug   string `json:"slug"`
-	Lang   string `json:"lang"`
+	Slug string `json:"slug"`
+	Lang string `json:"lang"`
+	// Pass tells if the native tests pass.
 	Pass   bool   `json:"pass"`
 	Output string `json:"output,omitempty"`
 	Ms     int64  `json:"ms"`
+	// Shared holds the results of the shared cases of each problem that the node solves (spec 09.2).
+	Shared []Shared `json:"shared,omitempty"`
+}
+
+// Shared is the result of the shared cases of one problem on one implementation.
+type Shared struct {
+	Problem    string `json:"problem"`
+	Cases      int    `json:"cases"`
+	Passed     int    `json:"passed"`
+	Skipped    int    `json:"skipped,omitempty"`
+	SkipReason string `json:"skip_reason,omitempty"`
+	// SkipExpected is true when the language cannot run the skipped cases by design, as C cannot run T = string. Such a skip does not hold back I1.
+	SkipExpected bool          `json:"skip_expected,omitempty"`
+	Failures     []CaseFailure `json:"failures,omitempty"`
+	// Error is set when the cases could not run, for example when the adapter does not build.
+	Error string `json:"error,omitempty"`
+}
+
+// OK tells if the native tests and the shared cases pass.
+func (t Test) OK() bool {
+	for _, s := range t.Shared {
+		if !s.OK() {
+			return false
+		}
+	}
+	return t.Pass
+}
+
+// OK tells if every case that ran passed.
+func (s Shared) OK() bool { return s.Error == "" && len(s.Failures) == 0 }
+
+// CaseFailure is one shared case that failed, with the reason.
+type CaseFailure struct {
+	Case   string `json:"case"`
+	Reason string `json:"reason"`
+	Got    string `json:"got,omitempty"`
+	Want   string `json:"want,omitempty"`
 }
 
 // Results is the content of one file build/results/<lang>.json.
@@ -264,12 +302,44 @@ func impl(n *node.Node, im node.Impl, env Env) Rung {
 	case !im.HasTests():
 		r.Next = append(r.Next, "add native tests (09.9)")
 	case !ran:
-		r.Next = append(r.Next, "the native tests did not run in this build")
-	case !t.Pass:
-		r.Next = append(r.Next, "the native tests fail")
+		r.Next = append(r.Next, "the tests did not run in this build")
+	case len(t.Shared) == 0:
+		if !t.Pass {
+			r.Next = append(r.Next, "the native tests fail")
+		}
+		r.Next = append(r.Next, "no problem that the node solves has a contract with shared cases (09.2)")
+	default:
+		ok := true
+		for _, s := range t.Shared {
+			switch {
+			case s.Error != "":
+				r.Next = append(r.Next, "the shared cases of "+s.Problem+" did not run: "+firstLine(s.Error))
+			case len(s.Failures) > 0:
+				r.Next = append(r.Next, fmt.Sprintf("%d of %d shared cases of %s fail, the first is %s", len(s.Failures), s.Cases, s.Problem, s.Failures[0].Case))
+			case s.Skipped > 0 && !s.SkipExpected:
+				r.Next = append(r.Next, fmt.Sprintf("%d shared cases of %s did not run: %s", s.Skipped, s.Problem, firstLine(s.SkipReason)))
+			default:
+				continue
+			}
+			ok = false
+		}
+		if ok && !t.Pass {
+			r.Next = append(r.Next, "the native tests fail")
+			ok = false
+		}
+		if ok {
+			r.Level = 1
+		}
 	}
-	r.Next = append(r.Next, "I1 needs the shared cases of the contract and the JSON adapter (09.2), which are M0 work")
+	if r.Level == 1 {
+		r.Next = append(r.Next, "I2 needs the differential and mutation runs (09.5, 09.6), which are M1 work")
+	}
 	return r
+}
+
+func firstLine(s string) string {
+	l, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return l
 }
 
 var vNames = []string{"none", "static frames", "interactive and checked", "reviewed"}

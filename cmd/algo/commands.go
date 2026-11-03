@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tamnd/algorithm-agent/check"
+	"github.com/tamnd/algorithm-agent/contract"
 	"github.com/tamnd/algorithm-agent/lang"
 	"github.com/tamnd/algorithm-agent/node"
 	"github.com/tamnd/algorithm-agent/site"
@@ -403,6 +404,36 @@ func cmdTest(args []string) error {
 		}
 	}
 	r := &lang.Runner{Keep: *keep, Log: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }}
+	// The contract of each problem is read once. A contract that does not load is an error of the run, because every test against it would be wrong.
+	contracts := map[string]*sharedCases{}
+	problems := func(n *node.Node) []*sharedCases {
+		var out []*sharedCases
+		for _, s := range n.Solves {
+			p := c.BySlug[s.Problem]
+			if p == nil || !contract.Exists(p.Dir) {
+				continue
+			}
+			sc, ok := contracts[p.Slug]
+			if !ok {
+				k, cases, err := contract.Load(p.Dir)
+				if err != nil {
+					sc = &sharedCases{err: err}
+				} else {
+					sc = &sharedCases{k: k, cases: cases}
+				}
+				contracts[p.Slug] = sc
+			}
+			out = append(out, sc)
+		}
+		return out
+	}
+	for _, n := range nodes {
+		for _, p := range problems(n) {
+			if p.err != nil {
+				return fmt.Errorf("the contract of a problem that %s solves: %w", n.Slug, p.err)
+			}
+		}
+	}
 	byLang := map[string]*status.Results{}
 	failed := 0
 	for _, n := range nodes {
@@ -431,11 +462,19 @@ func cmdTest(args []string) error {
 			state := "pass"
 			if !t.Pass {
 				state = "FAIL"
-				failed++
 			}
-			fmt.Printf("%-4s %s/%s (%d ms)\n", state, n.Slug, im.Lang, t.Ms)
+			fmt.Printf("%-4s %s/%s native tests (%d ms)\n", state, n.Slug, im.Lang, t.Ms)
 			if !t.Pass {
 				fmt.Println(indent(t.Output))
+			}
+			for _, p := range problems(n) {
+				start := time.Now()
+				s := r.Shared(n, im, p.k, p.cases)
+				t.Shared = append(t.Shared, s)
+				printShared(n.Slug, im.Lang, s, time.Since(start))
+			}
+			if !t.OK() {
+				failed++
 			}
 			res.Tests = append(res.Tests, t)
 		}
@@ -462,6 +501,42 @@ func cmdTest(args []string) error {
 		return errFindings
 	}
 	return nil
+}
+
+// sharedCases is the contract of one problem and its cases.
+type sharedCases struct {
+	k     *contract.Contract
+	cases []contract.Case
+	err   error
+}
+
+// printShared prints the counts of the shared cases and each failure, with the case id, so that a CI log names the case.
+func printShared(slug, lang string, s status.Shared, took time.Duration) {
+	state := "pass"
+	if !s.OK() {
+		state = "FAIL"
+	}
+	line := fmt.Sprintf("%-4s %s/%s shared cases of %s: %d of %d pass", state, slug, lang, s.Problem, s.Passed, s.Cases)
+	if s.Skipped > 0 {
+		line += fmt.Sprintf(", %d skipped", s.Skipped)
+	}
+	fmt.Printf("%s (%d ms)\n", line, took.Milliseconds())
+	if s.SkipReason != "" {
+		fmt.Println(indent("skipped: " + s.SkipReason))
+	}
+	if s.Error != "" {
+		fmt.Println(indent(s.Error))
+	}
+	for _, f := range s.Failures {
+		msg := fmt.Sprintf("case %s (%s): %s", f.Case, lang, f.Reason)
+		if f.Got != "" {
+			msg += "\n  got:  " + f.Got
+		}
+		if f.Want != "" {
+			msg += "\n  want: " + f.Want
+		}
+		fmt.Println(indent(msg))
+	}
 }
 
 // mergeTests keeps the old results of the nodes that this run did not test.
