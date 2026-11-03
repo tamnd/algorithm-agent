@@ -26,7 +26,7 @@ func TestLoadAndCheck(t *testing.T) {
 	if err != nil || len(ds) != 4 {
 		t.Fatalf("Load = %d decls, %v", len(ds), err)
 	}
-	c := &node.Corpus{Nodes: []*node.Node{{Slug: "m", Lean: map[string]string{
+	c := &node.Corpus{Nodes: []*node.Node{{Slug: "m", Rel: "nodes/sorting/m", Lean: map[string]string{
 		"module":  "Algo.M",
 		"model":   "Algo.M.good",
 		"correct": "Algo.M.missing",
@@ -39,7 +39,8 @@ func TestLoadAndCheck(t *testing.T) {
 		"L03 Algo.M.bad: uses the axiom sorryAx (a sorry)",
 		"L03 Algo.M.fast: uses the axiom Lean.ofReduceBool",
 		"L01 m lean.correct: Algo.M.missing is not a declaration of the Algo package",
-		"L01 m lean.model: Algo.M.good is a theorem, want a def",
+		"L01 m lean.model: Algo.M.good is of the kind theorem, want def",
+		"L09 m lean.module: Algo.M does not mirror the node path; use a module such as Algo.Sorting.M",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("Check =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -83,5 +84,53 @@ func TestCheckClaims(t *testing.T) {
 	delete(n.Lean, "cost")
 	if fs := CheckClaims(n, ds); len(fs) != 0 {
 		t.Errorf("a node without lean.cost gets findings: %v", fs)
+	}
+}
+
+func TestMirrors(t *testing.T) {
+	rel := "nodes/sorting/comparison-sorts/merge-sort"
+	for mod, want := range map[string]bool{
+		"Algo.Sorting.ComparisonSorts.MergeSort": true,
+		"Algo.Sorting.MergeSort":                 true,
+		"Algo.Sorting.Merge":                     false,
+		"Algo.Graphs.MergeSort":                  false,
+		"Algo.Sorting.Other.MergeSort":           false,
+		"Algo.MergeSort":                         false,
+	} {
+		if got := Mirrors(mod, rel); got != want {
+			t.Errorf("Mirrors(%q) = %v, want %v", mod, got, want)
+		}
+	}
+	if got := MirrorOf("nodes/graphs/shortest-paths/dijkstra"); got != "Algo.Graphs.ShortestPaths.Dijkstra" {
+		t.Errorf("MirrorOf = %q", got)
+	}
+}
+
+func TestStatementAndModel(t *testing.T) {
+	ds := Decls{
+		"Algo.S.M.run":     {Decl: "Algo.S.M.run", Kind: "def", Module: "Algo.S.M"},
+		"Algo.S.M.run'":    {Decl: "Algo.S.M.run'", Kind: "opaque", Module: "Algo.S.M"},
+		"Algo.S.P.Spec":    {Decl: "Algo.S.P.Spec", Kind: "def", Module: "Algo.S.P"},
+		"Algo.S.M.correct": {Decl: "Algo.S.M.correct", Kind: "theorem", Module: "Algo.S.M", Type: "∀ xs, Algo.S.P.Spec xs (Algo.S.M.run' xs)"},
+	}
+	n := &node.Node{Slug: "m", Rel: "nodes/s/m", Lean: map[string]string{"module": "Algo.S.M", "model": "Algo.S.M.run", "spec": "Algo.S.P.Spec", "correct": "Algo.S.M.correct"}}
+	var got []string
+	for _, f := range CheckNode(n, ds) {
+		got = append(got, f.String())
+	}
+	want := []string{
+		"L02 m lean.correct: the statement of Algo.S.M.correct does not mention the model Algo.S.M.run",
+		"L07 m lean.model: Algo.S.M.run is not computable, so the oracle cannot run it",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("CheckNode =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	n.Lean["model"] = "Algo.S.M.run'"
+	got = got[:0]
+	for _, f := range CheckNode(n, ds) {
+		got = append(got, f.String())
+	}
+	if len(got) != 2 || !strings.Contains(got[0], "is of the kind opaque, want def") || !strings.Contains(got[1], "L07 m lean.model: Algo.S.M.run' is opaque") {
+		t.Errorf("CheckNode with an opaque model = %q", got)
 	}
 }

@@ -157,6 +157,7 @@ func cmdCheck(args []string) error {
 	asJSON := f.Bool("json", false, "print the findings as JSON")
 	withViz := f.Bool("viz", false, "also build and check the scenes")
 	rules := f.Bool("rules", false, "print the rules and exit")
+	decls := f.String("decls", "build/lean/decls.jsonl", "the declarations that algo lean build wrote, for the L rules; a missing file skips them")
 	if err := parse(f, args); err != nil {
 		return err
 	}
@@ -175,7 +176,11 @@ func cmdCheck(args []string) error {
 	if err != nil {
 		return err
 	}
-	opt := check.Options{Rule: *rule, Main: *main}
+	ds, err := status.LoadDecls(under(*root, *decls))
+	if err != nil {
+		return err
+	}
+	opt := check.Options{Rule: *rule, Main: *main, Decls: ds}
 	if f.NArg() > 0 || *changed != "" {
 		opt.Only = map[string]bool{}
 		for _, s := range f.Args() {

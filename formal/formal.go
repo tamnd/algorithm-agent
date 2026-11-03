@@ -163,7 +163,13 @@ type Finding struct {
 	// Where is the declaration, or the node and its field.
 	Where string
 	Msg   string
+	// Node is the slug of the node of the finding, and Decl the declaration, when there is one.
+	Node string
+	Decl string
 }
+
+// Severities are the severities of the L rules in 13.3: a block rule stops a merge, and a level rule keeps the node below the level that needs it.
+var Severities = map[string]string{"L01": "block", "L02": "level", "L03": "block", "L05": "level", "L07": "level", "L09": "block"}
 
 func (f Finding) String() string { return f.Rule + " " + f.Where + ": " + f.Msg }
 
@@ -191,7 +197,7 @@ func Check(c *node.Corpus, ds Decls) []Finding {
 			if d.Sorry {
 				msg += " (a sorry)"
 			}
-			out = append(out, Finding{"L03", d.Decl, msg})
+			out = append(out, Finding{Rule: "L03", Where: d.Decl, Msg: msg, Decl: d.Decl})
 		}
 	}
 	if c == nil {
@@ -204,7 +210,7 @@ func Check(c *node.Corpus, ds Decls) []Finding {
 	return out
 }
 
-// CheckNode checks the names of the lean field of one node (rule L01).
+// CheckNode checks the lean field of one node: each name exists with the right kind (L01), the module mirrors the node path (L09), the correctness theorem names the spec and the model (L02), and the model is total and computable (L07).
 func CheckNode(n *node.Node, ds Decls) []Finding {
 	var out []Finding
 	mod := n.Lean["module"]
@@ -216,17 +222,99 @@ func CheckNode(n *node.Node, ds Decls) []Finding {
 		where := n.Slug + " lean." + k
 		d, ok := ds[v]
 		if !ok {
-			out = append(out, Finding{"L01", where, v + " is not a declaration of the Algo package"})
+			out = append(out, Finding{Rule: "L01", Where: where, Msg: v + " is not a declaration of the Algo package", Node: n.Slug})
 			continue
 		}
 		if want := Kinds[k]; want != nil && !slices.Contains(want, d.Kind) {
-			out = append(out, Finding{"L01", where, fmt.Sprintf("%s is a %s, want a %s", v, d.Kind, strings.Join(want, " or "))})
+			out = append(out, Finding{Rule: "L01", Where: where, Msg: fmt.Sprintf("%s is of the kind %s, want %s", v, d.Kind, strings.Join(want, " or ")), Node: n.Slug})
 		}
 		if mod != "" && k != "spec" && d.Module != mod {
-			out = append(out, Finding{"L01", where, fmt.Sprintf("%s is in the module %s, not in %s", v, d.Module, mod)})
+			out = append(out, Finding{Rule: "L01", Where: where, Msg: fmt.Sprintf("%s is in the module %s, not in %s", v, d.Module, mod), Node: n.Slug})
+		}
+	}
+	if mod == "" {
+		return out
+	}
+	if !Mirrors(mod, n.Rel) {
+		out = append(out, Finding{Rule: "L09", Where: n.Slug + " lean.module", Msg: fmt.Sprintf("%s does not mirror the node path; use a module such as %s", mod, MirrorOf(n.Rel)), Node: n.Slug})
+	}
+	if c, ok := ds[n.Lean["correct"]]; ok {
+		for _, k := range []string{"spec", "model"} {
+			if name := n.Lean[k]; name != "" && !mentions(c.Type, name) {
+				out = append(out, Finding{Rule: "L02", Where: n.Slug + " lean.correct", Msg: fmt.Sprintf("the statement of %s does not mention the %s %s", c.Decl, k, name), Node: n.Slug})
+			}
+		}
+	}
+	if m, ok := ds[n.Lean["model"]]; ok && (m.Kind == "def" || m.Kind == "opaque") {
+		switch {
+		case m.Kind == "opaque":
+			out = append(out, Finding{Rule: "L07", Where: n.Slug + " lean.model", Msg: m.Decl + " is opaque, which a partial def gives; the model must be total", Node: n.Slug})
+		case !m.Computable:
+			out = append(out, Finding{Rule: "L07", Where: n.Slug + " lean.model", Msg: m.Decl + " is not computable, so the oracle cannot run it", Node: n.Slug})
 		}
 	}
 	return out
+}
+
+// mentions tells if a statement names a declaration as a whole name, not as a part of a longer one.
+func mentions(typ, name string) bool {
+	for i := 0; i < len(typ); {
+		j := strings.Index(typ[i:], name)
+		if j < 0 {
+			return false
+		}
+		j += i
+		end := j + len(name)
+		if (j == 0 || !isNameChar(typ[j-1])) && (end == len(typ) || !isNameChar(typ[end])) {
+			return true
+		}
+		i = j + 1
+	}
+	return false
+}
+
+func isNameChar(b byte) bool {
+	return b == '.' || b == '_' || b == '\'' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= 0x80
+}
+
+// camel turns a kebab-case path segment into CamelCase: comparison-sorts gives ComparisonSorts.
+func camel(s string) string {
+	var b strings.Builder
+	for _, w := range strings.Split(s, "-") {
+		if w != "" {
+			b.WriteString(strings.ToUpper(w[:1]) + w[1:])
+		}
+	}
+	return b.String()
+}
+
+// MirrorOf returns the module that mirrors the node path in full (spec 07.2): nodes/graphs/shortest-paths/dijkstra gives Algo.Graphs.ShortestPaths.Dijkstra.
+func MirrorOf(rel string) string {
+	parts := strings.Split(strings.TrimPrefix(filepath.ToSlash(rel), "nodes/"), "/")
+	for i, p := range parts {
+		parts[i] = camel(p)
+	}
+	return "Algo." + strings.Join(parts, ".")
+}
+
+// Mirrors tells if a module mirrors the node path (rule L09). The last part is the slug in CamelCase, the first part after Algo is the top area, and the parts between are some of the sub-areas, in order. So both Algo.Sorting.ComparisonSorts.MergeSort and Algo.Sorting.MergeSort mirror nodes/sorting/comparison-sorts/merge-sort.
+func Mirrors(mod, rel string) bool {
+	want := strings.Split(MirrorOf(rel), ".")
+	got := strings.Split(mod, ".")
+	if len(got) < 3 || len(want) < 3 || got[0] != "Algo" || got[1] != want[1] || got[len(got)-1] != want[len(want)-1] {
+		return false
+	}
+	i := 2
+	for _, g := range got[2 : len(got)-1] {
+		for i < len(want)-1 && want[i] != g {
+			i++
+		}
+		if i == len(want)-1 {
+			return false
+		}
+		i++
+	}
+	return true
 }
 
 // classOps are the relations of Mathlib's asymptotics, as the pretty printer shows them.
@@ -304,7 +392,7 @@ func CheckClaims(n *node.Node, ds Decls) []Finding {
 			if c == "" || have[c] {
 				continue
 			}
-			out = append(out, Finding{"L05", n.Slug + " " + group + "." + k, fmt.Sprintf("%s has no class lemma in %s", m[k], mod)})
+			out = append(out, Finding{Rule: "L05", Where: n.Slug + " " + group + "." + k, Msg: fmt.Sprintf("%s has no class lemma in %s", m[k], mod), Node: n.Slug})
 		}
 	}
 	if n.Lean["cost"] != "" {

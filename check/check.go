@@ -1,6 +1,6 @@
 // Package check runs the audit rules of spec 13.3 that `algo check` needs.
 //
-// Each rule has an id, such as T01. A rule with the severity "block" stops a merge. A rule with the severity "warn" only reports.
+// Each rule has an id, such as T01. A rule with the severity "block" stops a merge. A rule with the severity "level" keeps a part below the level that needs it. A rule with the severity "warn" only reports.
 package check
 
 import (
@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tamnd/algorithm-agent/formal"
 	"github.com/tamnd/algorithm-agent/node"
 	"github.com/tamnd/algorithm-agent/status"
 )
@@ -23,6 +24,7 @@ type Severity string
 
 const (
 	Block Severity = "block"
+	Level Severity = "level"
 	Warn  Severity = "warn"
 )
 
@@ -65,6 +67,20 @@ var Rules = map[string]string{
 	"I11": "each line id of the main pseudocode has a marker in each tier-1 implementation",
 	"I12": "each implementation language is in the register",
 	"I15": "no generated file under build/ is committed, and no implementation has a build file; algo gen writes them",
+	"S01": "contract.yaml is valid; each complexity variable of each solving algorithm is a size parameter or is defined",
+	"S02": "each case validates against the contract",
+	"S03": "a custom checker has checker cases, valid and invalid, with a note for each invalid output",
+	"S04": "edge.jsonl has at least one case for each class of edge_classes",
+	"S05": "each generator is a Python file under generators/ that uses only the rng it gets",
+	"S06": "the contract of each core problem is reviewed by a person, bound to its hash",
+	"S09": "a flaky case names its open issue",
+	"L01": "each Lean name in the front matter exists in decls.jsonl with the expected kind",
+	"L02": "the correctness theorem mentions the spec and the model",
+	"L03": "each declaration uses only propext, Classical.choice and Quot.sound",
+	"L04": "the fidelity review of the spec of a core node is current",
+	"L05": "each time claim of a node with lean.cost has a class lemma of the same class",
+	"L07": "the model is total and computable",
+	"L09": "the module path mirrors the node path",
 	"X01": "each link in a node to /<slug>/ names a node, an area or a site page",
 	"X06": "no node slug is a reserved word, a language id or an area id",
 }
@@ -77,6 +93,8 @@ type Options struct {
 	Rule string
 	// Main is true on the main branch, where provisional ids are an error (T06).
 	Main bool
+	// Decls are the declarations that algo lean build wrote. When it is nil, the rules L01 to L09 that need them do not run.
+	Decls formal.Decls
 }
 
 type run struct {
@@ -127,7 +145,10 @@ func Run(c *node.Corpus, opt Options) []Finding {
 		r.pseudo(n)
 		r.impls(n)
 		r.links(n)
+		r.contracts(n)
+		r.leanNode(n)
 	}
+	r.leanDecls()
 	r.cycles("G01", "prereqs", func(n *node.Node) []string { return n.Prereqs })
 	r.cycles("G02", "variant_of and generalizes", func(n *node.Node) []string {
 		out := slices.Clone(n.Generalizes)

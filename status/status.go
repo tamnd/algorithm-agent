@@ -159,8 +159,8 @@ func Hash(path string) (string, error) {
 	return hex.EncodeToString(s[:]), nil
 }
 
-// reviewed tells if reviews/<tag>/<part>.yaml exists, approves, and binds to the current hash of file.
-func reviewed(root, tag, part, file string) (bool, string) {
+// Reviewed tells if reviews/<tag>/<part>.yaml exists, approves, and binds to the current hash of file.
+func Reviewed(root, tag, part, file string) (bool, string) {
 	if tag == "" {
 		return false, "the node has no tag yet"
 	}
@@ -241,7 +241,7 @@ func human(n *node.Node, env Env) (r Rung) {
 	r.Level = 2
 	root := env.Corpus.Root
 	for _, p := range full {
-		if ok, why := reviewed(root, n.Tag, "proof-"+p.ID, filepath.Join(root, p.Path)); !ok {
+		if ok, why := Reviewed(root, n.Tag, "proof-"+p.ID, filepath.Join(root, p.Path)); !ok {
 			r.Next = append(r.Next, p.ID+": "+why)
 		}
 	}
@@ -302,19 +302,20 @@ func lean(n *node.Node, env Env) (r Rung) {
 	ds := env.Decls
 	var need []string
 	for _, f := range formal.CheckNode(n, ds) {
-		need = append(need, f.Where+": "+f.Msg)
+		// L02 is the rule of L2, and the rung of L2 below checks it.
+		if f.Rule != "L02" {
+			need = append(need, f.Where+": "+f.Msg+" ("+f.Rule+")")
+		}
 	}
 	model, spec := n.Lean["model"], n.Lean["spec"]
 	if model == "" {
 		need = append(need, "name the model in lean.model")
-	} else if d, ok := ds[model]; ok && !d.Computable {
-		need = append(need, "the model "+model+" is not computable (L07)")
 	}
 	if spec == "" {
 		need = append(need, "name the spec of the problem in lean.spec")
 	}
 	if n.Level == "core" {
-		if ok, why := reviewed(env.Corpus.Root, n.Tag, "lean-spec", file); !ok {
+		if ok, why := Reviewed(env.Corpus.Root, n.Tag, "lean-spec", file); !ok {
 			need = append(need, "a fidelity review of the spec: "+why)
 		}
 	}
@@ -594,7 +595,7 @@ func Writing(n *node.Node, env Env) (r Rung) {
 		}
 	}
 	file := filepath.Join(n.Dir, "node.md")
-	if ok, why := reviewed(env.Corpus.Root, n.Tag, "text", file); !ok {
+	if ok, why := Reviewed(env.Corpus.Root, n.Tag, "text", file); !ok {
 		r.Level = 4
 		r.Next = []string{"a review of the text: " + why}
 		return r

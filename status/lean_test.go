@@ -64,7 +64,7 @@ func TestLeanLadder(t *testing.T) {
 		}), 0},
 	}
 	for _, tc := range tests {
-		n := &node.Node{Slug: "merge-sort", Level: "intro", Lean: field}
+		n := &node.Node{Slug: "merge-sort", Rel: "nodes/sorting/comparison-sorts/merge-sort", Level: "intro", Lean: field}
 		r := lean(n, Env{Corpus: &node.Corpus{Root: root}, Decls: tc.decls})
 		if r.Level != tc.level {
 			t.Errorf("%s: level %d, want %d (next %v)", tc.name, r.Level, tc.level, r.Next)
