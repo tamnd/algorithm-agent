@@ -66,6 +66,8 @@ make site     # render testdata/corpus into build/site
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. To report a security problem, read [SECURITY.md](SECURITY.md).
 
+To release, push a tag `vX.Y.Z` and run `scripts/release.sh vX.Y.Z`. The script builds the archives from a clean tree of the tag and publishes the release. The release workflow then replaces the files with copies that have build provenance. A patch release comes every few merged pull requests. A minor release comes at the end of each milestone.
+
 ## Roadmap
 
 The work is in six milestones, M0 to M5, from November 2026 to December 2028. [Spec 19](https://algorithm.tamnd.com/spec/19-milestones/) gives the goal and the exit criteria of each one. The [milestones](https://github.com/tamnd/algorithm-agent/milestones) list the open issues. Issues with the label `good first issue` are small and clear.
