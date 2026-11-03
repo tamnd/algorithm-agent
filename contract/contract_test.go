@@ -4,6 +4,7 @@ package contract
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,5 +195,51 @@ func TestCustom(t *testing.T) {
 		if r := verdict(t, k, c, out, cu); r != want {
 			t.Errorf("output %s: reason %q, want %q", out, r, want)
 		}
+	}
+}
+
+func TestOracle(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("no python3")
+	}
+	dir := write(t, map[string]string{
+		"contract.yaml": sortContract,
+		"reference.py":  "def sort(xs):\n    xs.sort()\n",
+	})
+	k, _, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k.OracleFile() != "reference.py" || k.OutName() != "xs" {
+		t.Fatalf("OracleFile = %q, OutName = %q", k.OracleFile(), k.OutName())
+	}
+	o, err := k.StartOracle(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer o.Close()
+	good := Case{Name: "two", Args: map[string]json.RawMessage{"xs": json.RawMessage(`[3,1,2]`)}, Expect: json.RawMessage(`[1,2,3]`)}
+	if r, out, err := k.Agree(o, good, nil); err != nil || r != "" || string(out) != "[1, 2, 3]" {
+		t.Errorf("Agree = %q, %s, %v", r, out, err)
+	}
+	wrong := good
+	wrong.Expect = json.RawMessage(`[3,2,1]`)
+	if r, _, err := k.Agree(o, wrong, nil); err != nil || r == "" {
+		t.Errorf("a wrong expect agrees: %q, %v", r, err)
+	}
+	if _, err := o.Run(map[string]json.RawMessage{"ys": json.RawMessage(`[]`)}, "xs"); err == nil || !strings.Contains(err.Error(), "TypeError") {
+		t.Errorf("a bad argument gives %v", err)
+	}
+	big := Case{Name: "big", Args: map[string]json.RawMessage{"xs": json.RawMessage(`["9223372036854775807",0,"-9223372036854775808"]`)}, Expect: json.RawMessage(`["-9223372036854775808",0,"9223372036854775807"]`)}
+	if r, _, err := k.Agree(o, big, nil); err != nil || r != "" {
+		t.Errorf("the integers in strings: %q, %v", r, err)
+	}
+	words := Case{Name: "words", T: "string", Args: map[string]json.RawMessage{"xs": json.RawMessage(`["b","10","a"]`)}, Expect: json.RawMessage(`["10","a","b"]`)}
+	if r, _, err := k.Agree(o, words, nil); err != nil || r != "" {
+		t.Errorf("the strings of digits: %q, %v", r, err)
+	}
+	empty, _, _ := Load(write(t, map[string]string{"contract.yaml": sortContract}))
+	if _, err := empty.StartOracle(nil); !errors.Is(err, ErrNoOracle) {
+		t.Errorf("no oracle gives %v", err)
 	}
 }
