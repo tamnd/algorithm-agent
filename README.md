@@ -25,6 +25,7 @@ Run these commands in a clone of tamnd/algorithm.
 | Command | What it does |
 | --- | --- |
 | `algo new algorithm heap-sort -area sorting/comparison-sorts` | Makes a node directory with the sections of its kind. |
+| `algo mint` | Gives each provisional id `NEW-<slug>` a permanent tag, and writes it into tags.reg and the provenance. Add `-dry-run` to see the tags first. |
 | `algo check` | Runs the audit rules. Add `-changed origin/main` to check only the nodes that a branch changes. |
 | `algo status binary-search` | Shows the ladders of a node and what the next level needs. |
 | `algo test -unsafe-local binary-search` | Runs the native tests of the implementations. |

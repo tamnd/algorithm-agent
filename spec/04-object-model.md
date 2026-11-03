@@ -25,7 +25,7 @@ Notes:
 
 ## 4.2 Tags, slugs and URIs
 
-- **Tag.** 6 characters of Crockford base32, the alphabet of math2, for example `4MRG7S`. A tag is permanent and never reused. `registers/tags.reg` lists each tag, its slug at minting and the commit. A new node has a provisional id `~` plus 8 hex characters until the mint workflow gives it a tag before the merge, as in math2.
+- **Tag.** 6 characters of Crockford base32, the alphabet of math2, for example `4MRG7S`. A tag is permanent and never reused. `registers/tags.reg` lists each tag and its slug at minting. A new node has the provisional id `NEW-<slug>` until `algo mint` gives it a tag before the merge. `algo mint` never gives a tag that is in `registers/tags.reg` or `registers/retired.reg`.
 - **Slug.** Lowercase ASCII words joined by `-`, unique over all nodes of all kinds, for example `dijkstra`, `binary-heap`, `single-source-shortest-paths`. The slug is the URL. It can change; the old slug goes to `registers/aliases.reg` and the site redirects it. A slug never names a site section (14.2 lists the reserved words).
 - **URI.** `al://4MRG7S`, and `al://4MRG7S@2027.03` for the node in a release. Fragments name parts: `al://4MRG7S#proof-invariant`, `al://4MRG7S/impl/rust`.
 - **Names.** `name` is the common English name. `aliases` lists the other names, each with a language when it is not English (`{name: "Алгоритм Дейкстры", lang: ru}`). Search indexes every alias (15.2).

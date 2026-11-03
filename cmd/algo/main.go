@@ -38,7 +38,6 @@ type command struct {
 var planned = map[string]string{
 	"fmt":        "M0",
 	"audit":      "M0",
-	"mint":       "M0",
 	"mv":         "M0",
 	"gen":        "M0",
 	"lean":       "M0",
@@ -64,6 +63,7 @@ var commands []command
 func init() {
 	commands = []command{
 		{"new", "make a node directory with a provisional id and the sections of its kind", cmdNew},
+		{"mint", "give each provisional id a permanent tag", cmdMint},
 		{"check", "run the audit rules, and the scene checks with -viz", cmdCheck},
 		{"status", "show the ladders of a node and what the next level needs", cmdStatus},
 		{"test", "run the native tests of the implementations", cmdTest},
