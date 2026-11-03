@@ -89,6 +89,8 @@ type Case struct {
 	// Flaky marks a case that gave two results on the same input (rule S09). It counts as a failure, and Issue names the open issue.
 	Flaky bool   `json:"flaky,omitempty"`
 	Issue string `json:"issue,omitempty"`
+	// Found names the node and the language that a regression case broke, such as merge-sort/go (spec 09.11).
+	Found string `json:"found,omitempty"`
 
 	// File is the case file without .jsonl, such as basic. Line is the line in it.
 	File string `json:"-"`
@@ -218,11 +220,19 @@ func (k *Contract) Types() []string {
 	return []string{"int", "string"}
 }
 
-// CheckCase checks that a case gives each parameter a value of its type.
+// CheckCase checks that a case gives each parameter a value of its type, and that its expect has the output type.
 func (k *Contract) CheckCase(c Case) error {
 	if c.Name == "" {
 		return errors.New("the case has no name")
 	}
+	if err := k.CheckArgs(c); err != nil {
+		return err
+	}
+	return k.checkExpect(c)
+}
+
+// CheckArgs checks the type of T of a case and that it gives each parameter a value of its type. It does not look at expect, so it also checks a generated input.
+func (k *Contract) CheckArgs(c Case) error {
 	if c.T != "" && (len(k.Generic) == 0 || !slices.Contains(k.Types(), c.T)) {
 		return fmt.Errorf("the case has T = %q, but the contract is tested only with %s", c.T, strings.Join(k.Types(), " and "))
 	}
@@ -245,6 +255,10 @@ func (k *Contract) CheckCase(c Case) error {
 			return fmt.Errorf("the parameter %s: %w", p.Name, err)
 		}
 	}
+	return nil
+}
+
+func (k *Contract) checkExpect(c Case) error {
 	if len(c.Expect) > 0 {
 		v, err := decode(c.Expect)
 		if err != nil {

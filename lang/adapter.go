@@ -103,65 +103,13 @@ func unsupported(lang string, t contract.Type) error {
 // Shared runs the shared cases of the contract k on one implementation (spec 09.2). It builds the adapter in a new temporary directory, starts it once and sends the cases in order. A crash fails the case, and the next case gets a new adapter.
 func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases []contract.Case) status.Shared {
 	s := status.Shared{Problem: k.Problem, Cases: len(cases)}
-	gen, ok := adapters[im.Lang]
-	if !ok {
-		s.Error = "no adapter for the language " + im.Lang
-		return s
-	}
-	dir, err := os.MkdirTemp(r.TempDir, "algo-shared-"+im.Lang+"-")
+	ss, err := r.Open(n, im, k)
 	if err != nil {
 		s.Error = err.Error()
 		return s
 	}
-	defer r.reap()
-	if r.Keep {
-		r.logf("keep %s", dir)
-	} else {
-		defer os.RemoveAll(dir)
-	}
-	if err := stage(dir, im, false); err != nil {
-		s.Error = err.Error()
-		return s
-	}
-	types := k.Types()
-	run, err := r.buildAdapter(gen, dir, n, im, k, types, true)
-	if err != nil && len(types) > 1 {
-		first := err
-		types = []string{"int"}
-		if run, err = r.buildAdapter(gen, dir, n, im, k, types, false); err == nil {
-			if errors.Is(first, errNoGenerics) {
-				s.SkipReason, s.SkipExpected = first.Error(), true
-			} else {
-				s.SkipReason = "the entry does not build with T = string: " + errorLine(first.Error())
-			}
-		}
-	}
-	if err != nil {
-		s.Error = err.Error()
-		return s
-	}
-
-	var custom *contract.Custom
-	if k.Checker.Kind == "custom" {
-		if r.Box != nil {
-			if err := r.Box.Ready("python"); err != nil {
-				s.Error = "the custom checker runs in the Python image: " + err.Error()
-				return s
-			}
-		}
-		if custom, err = k.StartCustom(r.checkerArgv(k)); err != nil {
-			s.Error = err.Error()
-			return s
-		}
-		defer custom.Close()
-	}
-
-	var p *jsonl.Proc
-	defer func() {
-		if p != nil {
-			p.Close()
-		}
-	}()
+	defer ss.Close()
+	s.SkipReason, s.SkipExpected = ss.SkipReason, ss.SkipExpected
 	fail := func(c contract.Case, reason string, got, want []byte) {
 		if c.Flaky {
 			reason += "; " + flakyNote(c)
@@ -176,53 +124,17 @@ func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases 
 		s.Failures = append(s.Failures, f)
 	}
 	for _, c := range cases {
-		if !slices.Contains(types, c.Type()) {
+		if !ss.Supports(c) {
 			s.Skipped++
 			continue
 		}
-		if p == nil {
-			if p, err = r.startAdapter(im.Lang, dir, run); err != nil {
-				s.Error = err.Error()
-				return s
-			}
-		}
-		line, err := p.Call(map[string]any{"op": "call", "id": c.ID(), "T": c.Type(), "args": c.Args}, CaseTimeout)
-		if err != nil {
-			reason := "the adapter crashed: " + err.Error()
-			if errors.Is(err, jsonl.ErrTimeout) {
-				reason = fmt.Sprintf("no result in %s", CaseTimeout)
-			}
-			fail(c, cut(reason, 1500), nil, nil)
-			p.Kill()
-			p = nil
-			continue
-		}
-		var rep struct {
-			ID     string          `json:"id"`
-			OK     bool            `json:"ok"`
-			Result json.RawMessage `json:"result"`
-			Error  string          `json:"error"`
-		}
-		if err := json.Unmarshal(line, &rep); err != nil || rep.ID != c.ID() {
-			fail(c, "the adapter wrote a line that is not the reply: "+contract.Short(strings.TrimSpace(string(line))), nil, nil)
-			p.Kill()
-			p = nil
-			continue
-		}
-		if !rep.OK {
-			fail(c, "the call failed: "+cut(rep.Error, 1500), nil, c.Expect)
-			continue
-		}
-		if len(rep.Result) == 0 {
-			rep.Result = json.RawMessage("null")
-		}
-		reason, err := k.Verdict(c, rep.Result, custom)
+		got, reason, err := ss.Run(c)
 		if err != nil {
 			s.Error = err.Error()
 			return s
 		}
 		if reason != "" {
-			fail(c, reason, rep.Result, c.Expect)
+			fail(c, reason, got, c.Expect)
 			continue
 		}
 		if c.Flaky {
@@ -234,6 +146,139 @@ func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases 
 		s.Passed++
 	}
 	return s
+}
+
+// Session is the built adapter of one implementation for one contract, with the custom checker of the contract. It runs one case at a time, so a caller can run many cases, as the differential run and the shrinker do (spec 09.5, 09.11).
+type Session struct {
+	r      *Runner
+	lang   string
+	dir    string
+	run    []string
+	k      *contract.Contract
+	custom *contract.Custom
+	p      *jsonl.Proc
+	// Types are the types of T that the adapter supports. SkipReason says why a type of the contract is not in Types, and SkipExpected tells if the skip is expected (a language without generics).
+	Types        []string
+	SkipReason   string
+	SkipExpected bool
+}
+
+// Open builds the adapter of the implementation for the contract in a new temporary directory, and starts the custom checker when the contract has one. Close removes the directory.
+func (r *Runner) Open(n *node.Node, im node.Impl, k *contract.Contract) (*Session, error) {
+	gen, ok := adapters[im.Lang]
+	if !ok {
+		return nil, errors.New("no adapter for the language " + im.Lang)
+	}
+	dir, err := os.MkdirTemp(r.TempDir, "algo-shared-"+im.Lang+"-")
+	if err != nil {
+		return nil, err
+	}
+	ss := &Session{r: r, lang: im.Lang, dir: dir, k: k}
+	if r.Keep {
+		r.logf("keep %s", dir)
+	}
+	if err := stage(dir, im, false); err != nil {
+		ss.Close()
+		return nil, err
+	}
+	types := k.Types()
+	run, err := r.buildAdapter(gen, dir, n, im, k, types, true)
+	if err != nil && len(types) > 1 {
+		first := err
+		types = []string{"int"}
+		if run, err = r.buildAdapter(gen, dir, n, im, k, types, false); err == nil {
+			if errors.Is(first, errNoGenerics) {
+				ss.SkipReason, ss.SkipExpected = first.Error(), true
+			} else {
+				ss.SkipReason = "the entry does not build with T = string: " + errorLine(first.Error())
+			}
+		}
+	}
+	if err != nil {
+		ss.Close()
+		return nil, err
+	}
+	ss.run, ss.Types = run, types
+	if k.Checker.Kind == "custom" {
+		if r.Box != nil {
+			if err := r.Box.Ready("python"); err != nil {
+				ss.Close()
+				return nil, errors.New("the custom checker runs in the Python image: " + err.Error())
+			}
+		}
+		if ss.custom, err = k.StartCustom(r.checkerArgv(k)); err != nil {
+			ss.Close()
+			return nil, err
+		}
+	}
+	return ss, nil
+}
+
+// Supports tells if the adapter supports the type of T of the case.
+func (ss *Session) Supports(c contract.Case) bool { return slices.Contains(ss.Types, c.Type()) }
+
+// Run runs one case. It gives the result of the call, and the reason why the case fails, which is empty when the case passes. A crash, a timeout or a reply that is not valid fails the case, and the next case gets a new adapter. The error is for a problem of the run itself, such as a checker that does not answer.
+func (ss *Session) Run(c contract.Case) (json.RawMessage, string, error) {
+	if ss.p == nil {
+		p, err := ss.r.startAdapter(ss.lang, ss.dir, ss.run)
+		if err != nil {
+			return nil, "", err
+		}
+		ss.p = p
+	}
+	line, err := ss.p.Call(map[string]any{"op": "call", "id": c.ID(), "T": c.Type(), "args": c.Args}, CaseTimeout)
+	if err != nil {
+		reason := "the adapter crashed: " + err.Error()
+		if errors.Is(err, jsonl.ErrTimeout) {
+			reason = fmt.Sprintf("no result in %s", CaseTimeout)
+		}
+		ss.kill()
+		return nil, cut(reason, 1500), nil
+	}
+	var rep struct {
+		ID     string          `json:"id"`
+		OK     bool            `json:"ok"`
+		Result json.RawMessage `json:"result"`
+		Error  string          `json:"error"`
+	}
+	if err := json.Unmarshal(line, &rep); err != nil || rep.ID != c.ID() {
+		ss.kill()
+		return nil, "the adapter wrote a line that is not the reply: " + contract.Short(strings.TrimSpace(string(line))), nil
+	}
+	if !rep.OK {
+		return nil, "the call failed: " + cut(rep.Error, 1500), nil
+	}
+	if len(rep.Result) == 0 {
+		rep.Result = json.RawMessage("null")
+	}
+	reason, err := ss.k.Verdict(c, rep.Result, ss.custom)
+	if err != nil {
+		return rep.Result, "", err
+	}
+	return rep.Result, reason, nil
+}
+
+func (ss *Session) kill() {
+	if ss.p != nil {
+		ss.p.Kill()
+		ss.p = nil
+	}
+}
+
+// Close stops the adapter and the checker, and removes the directory unless the runner keeps it.
+func (ss *Session) Close() {
+	if ss.p != nil {
+		ss.p.Close()
+		ss.p = nil
+	}
+	if ss.custom != nil {
+		ss.custom.Close()
+		ss.custom = nil
+	}
+	ss.r.reap()
+	if !ss.r.Keep {
+		_ = os.RemoveAll(ss.dir)
+	}
 }
 
 // flakyNote says that the case is flaky and names its issue.
