@@ -781,7 +781,7 @@ func cmdViz(args []string) error {
 // cmdSite builds, serves or checks the static site.
 func cmdSite(args []string) error {
 	if len(args) == 0 {
-		return usageError{"use algo site build, algo site serve or algo site check"}
+		return usageError{"use algo site build, algo site serve, algo site check or algo site deploy"}
 	}
 	sub, args := args[0], args[1:]
 	f := newFlags("site "+sub, "[flags]")
@@ -794,6 +794,11 @@ func cmdSite(args []string) error {
 	commit := f.String("commit", "", "the commit of the content; the default comes from git")
 	minify := f.Bool("minify", false, "minify the scenes")
 	addr := f.String("addr", "localhost:8150", "the address for serve")
+	var d deployOptions
+	f.StringVar(&d.Project, "project", "algorithm", "the Cloudflare Pages project, for deploy")
+	f.StringVar(&d.Branch, "branch", "", "the branch of the deployment; the default is main, or the git branch with -preview")
+	f.BoolVar(&d.Preview, "preview", false, "deploy to a branch alias, not to production")
+	noBuild := f.Bool("no-build", false, "deploy the directory of -out as it is, for deploy")
 	if err := parse(f, args); err != nil {
 		return err
 	}
@@ -867,8 +872,22 @@ func cmdSite(args []string) error {
 		fmt.Fprintf(os.Stderr, "serving %s at http://%s\n", opt.Out, *addr)
 		srv := &http.Server{Addr: *addr, Handler: serveDir(opt.Out), ReadHeaderTimeout: 10 * time.Second}
 		return srv.ListenAndServe()
+	case "deploy":
+		if !*noBuild {
+			if err := build(); err != nil {
+				return err
+			}
+		}
+		d.Dir, d.Commit = opt.Out, opt.Commit
+		if d.Branch == "" {
+			d.Branch = "main"
+			if d.Preview {
+				d.Branch = gitBranch(*root)
+			}
+		}
+		return deploy(d)
 	}
-	return usageError{fmt.Sprintf("unknown subcommand %q; use build, serve or check", sub)}
+	return usageError{fmt.Sprintf("unknown subcommand %q; use build, serve, check or deploy", sub)}
 }
 
 // serveDir serves the site like Cloudflare Pages: /a/ maps to a/index.html, and a missing page gets 404.html.

@@ -36,6 +36,7 @@ Run these commands in a clone of tamnd/algorithm.
 | `algo viz check` | Builds each scene and runs each preset two times. |
 | `algo site serve` | Renders the site and serves it at http://localhost:8150. It renders again when a file changes. |
 | `algo site check` | Renders the site and checks each internal link. |
+| `algo site deploy` | Renders the site, checks the limits of Cloudflare Pages (19500 files, 24 MB for one file), and uploads the tree with wrangler. It reads `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` from the environment and does not print them. `-preview` deploys to the alias of a branch, `-no-build` uploads the `-out` directory as it is. |
 
 `algo help` shows all commands. Commands that are planned but not built yet exit with code 3 and name their milestone.
 
