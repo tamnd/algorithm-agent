@@ -359,7 +359,7 @@ func lean(n *node.Node, env Env) (r Rung) {
 // hasClassLemma tells if the module has a theorem that states an asymptotic class with the standard axioms only.
 func hasClassLemma(ds formal.Decls, mod string) bool {
 	for _, d := range ds {
-		if d.Module == mod && d.Kind == "theorem" && len(d.Disallowed()) == 0 && (strings.Contains(d.Type, "=O[") || strings.Contains(d.Type, "=Θ[") || strings.Contains(d.Type, "IsBigO") || strings.Contains(d.Type, "IsTheta")) {
+		if d.Module == mod && d.Kind == "theorem" && len(d.Disallowed()) == 0 && formal.IsClassLemma(d.Type) {
 			return true
 		}
 	}

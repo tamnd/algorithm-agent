@@ -69,6 +69,18 @@
 </section>
 {{end}}
 
+{{define "formal-section"}}<h2 id="formal-proof">Formal proof</h2>
+{{template "formal-body" .}}{{end}}
+
+{{define "formal-body"}}{{with .Lean}}<section class="formal" aria-label="Formal proof">
+<p>The Lean module <a href="{{.URL}}"><code>{{.Module}}</code></a> holds the model and the proofs of this page. Its level is {{template "rung" .Rung}} {{.Rung.Name}}.{{if .Built}}{{if .Std}} Each declaration uses only the standard axioms.{{else}} A declaration of the module uses an axiom outside the policy.{{end}}{{end}}</p>
+{{if .Key}}<div class="table-wrap"><table class="decls">
+<thead><tr><th scope="col">Part</th><th scope="col">Declaration</th><th scope="col">Statement</th></tr></thead>
+<tbody>{{range .Key}}<tr><td>{{.Role}}</td><td>{{if .Source}}<a href="{{.Source}}"><code>{{.Short}}</code></a>{{else}}<code>{{.Short}}</code>{{end}}</td><td><code class="stmt">{{.Type}}</code></td></tr>{{end}}</tbody>
+</table></div>{{else if not .Built}}<p>This build did not run the Lean checks. The <a href="{{.URL}}">Lean page</a> shows the source.</p>{{end}}
+<p><a href="{{.URL}}">See the Lean source and each declaration</a></p>
+</section>{{end}}{{end}}
+
 {{define "refs-list"}}<ol class="refs">{{range .Sources}}<li>{{if .URL}}<a href="{{.URL}}">{{.Text}}</a>{{else}}{{.Text}}{{end}}{{with .Locator}}, {{.}}{{end}}{{with .Note}}. {{.}}{{end}}</li>{{end}}</ol>
 {{end}}
 

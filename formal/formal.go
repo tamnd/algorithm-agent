@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -198,6 +199,7 @@ func Check(c *node.Corpus, ds Decls) []Finding {
 	}
 	for _, nd := range c.Nodes {
 		out = append(out, CheckNode(nd, ds)...)
+		out = append(out, CheckClaims(nd, ds)...)
 	}
 	return out
 }
@@ -223,6 +225,93 @@ func CheckNode(n *node.Node, ds Decls) []Finding {
 		if mod != "" && k != "spec" && d.Module != mod {
 			out = append(out, Finding{"L01", where, fmt.Sprintf("%s is in the module %s, not in %s", v, d.Module, mod)})
 		}
+	}
+	return out
+}
+
+// classOps are the relations of Mathlib's asymptotics, as the pretty printer shows them.
+var classOps = []string{"=O[", "=Θ[", "=o["}
+
+// IsClassLemma tells if a type states an asymptotic class, such as `f =O[Filter.atTop] g`.
+func IsClassLemma(typ string) bool {
+	for _, op := range classOps {
+		if strings.Contains(typ, op) {
+			return true
+		}
+	}
+	return false
+}
+
+var (
+	funRE   = regexp.MustCompile(`^fun \(?(\w+)(?: : [^)]*)?\)? => `)
+	claimRE = regexp.MustCompile(`^[ΘOΩo]\((.*)\)$`)
+	ascRE   = regexp.MustCompile(`\((\w+) : [^()]*\)`)
+	dropRE  = regexp.MustCompile(`↑|Real\.|Nat\.|\\|[\s*·()]`)
+)
+
+// ClassOf returns the class of a class lemma in a normal form, such as "nlogn" for `f =O[Filter.atTop] fun n => ↑n * Real.log ↑n`. It returns "" when typ is not a class lemma.
+func ClassOf(typ string) string {
+	for _, op := range classOps {
+		i := strings.Index(typ, op)
+		if i < 0 {
+			continue
+		}
+		rest := typ[i+len(op):]
+		j := strings.Index(rest, "] ")
+		if j < 0 {
+			return ""
+		}
+		g := strings.TrimSpace(rest[j+2:])
+		g = funRE.ReplaceAllString(g, "")
+		return normClass(g)
+	}
+	return ""
+}
+
+// ClaimClass returns the class of a front matter bound in the same normal form, such as "nlogn" for "Θ(n log n)". It returns "" when the bound is not of the form Θ(...), O(...) or Ω(...).
+func ClaimClass(bound string) string {
+	m := claimRE.FindStringSubmatch(strings.TrimSpace(bound))
+	if m == nil {
+		return ""
+	}
+	return normClass(m[1])
+}
+
+func normClass(s string) string {
+	s = strings.ReplaceAll(s, "lg", "log")
+	s = ascRE.ReplaceAllString(s, "$1")
+	return dropRE.ReplaceAllString(s, "")
+}
+
+// CheckClaims compares the time claims of a node that has lean.cost with the class lemmas of its module (rule L05). A claim with no class lemma of the same class is a finding. Space claims count only when lean.space is set.
+func CheckClaims(n *node.Node, ds Decls) []Finding {
+	mod := n.Lean["module"]
+	if mod == "" || n.Complexity == nil {
+		return nil
+	}
+	have := map[string]bool{}
+	for _, d := range ds {
+		if d.Module == mod && d.Kind == "theorem" && len(d.Disallowed()) == 0 {
+			if c := ClassOf(d.Type); c != "" {
+				have[c] = true
+			}
+		}
+	}
+	var out []Finding
+	check := func(group string, m map[string]string) {
+		for _, k := range slices.Sorted(maps.Keys(m)) {
+			c := ClaimClass(m[k])
+			if c == "" || have[c] {
+				continue
+			}
+			out = append(out, Finding{"L05", n.Slug + " " + group + "." + k, fmt.Sprintf("%s has no class lemma in %s", m[k], mod)})
+		}
+	}
+	if n.Lean["cost"] != "" {
+		check("time", n.Complexity.Time)
+	}
+	if n.Lean["space"] != "" {
+		check("space", n.Complexity.Space)
 	}
 	return out
 }

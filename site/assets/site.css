@@ -395,3 +395,7 @@ mark { background: color-mix(in srgb, var(--st-compare) 35%, transparent); color
   .js .panel { display: block !important; }
   .node-grid { display: block; }
 }
+
+.decls code.stmt { white-space: pre-wrap; word-break: break-word; background: none; padding: 0; }
+.decls td { vertical-align: top; padding: 0.4rem 0.75rem 0.4rem 0; }
+.decls .doc { color: var(--muted); font-size: 0.88rem; }

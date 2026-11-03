@@ -45,3 +45,43 @@ func TestLoadAndCheck(t *testing.T) {
 		t.Errorf("Check =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+func TestClasses(t *testing.T) {
+	for typ, want := range map[string]string{
+		"(fun n => ↑n * ↑(Nat.clog 2 n)) =O[Filter.atTop] fun n => ↑n * Real.log ↑n": "nlogn",
+		"f =Θ[Filter.atTop] fun (n : ℕ) => (n : ℝ) ^ 2":                              "n^2",
+		"∀ n, f n ≤ n": "",
+	} {
+		if got := ClassOf(typ); got != want {
+			t.Errorf("ClassOf(%q) = %q, want %q", typ, got, want)
+		}
+	}
+	for claim, want := range map[string]string{"Θ(n log n)": "nlogn", "O(n lg n)": "nlogn", "Θ(n^2)": "n^2", "Θ(n²)": "n²", "amortized": ""} {
+		if got := ClaimClass(claim); got != want {
+			t.Errorf("ClaimClass(%q) = %q, want %q", claim, got, want)
+		}
+	}
+}
+
+func TestCheckClaims(t *testing.T) {
+	ds := Decls{
+		"Algo.M.cost":  {Decl: "Algo.M.cost", Kind: "theorem", Module: "Algo.M"},
+		"Algo.M.class": {Decl: "Algo.M.class", Kind: "theorem", Module: "Algo.M", Type: "f =O[Filter.atTop] fun n => ↑n * Real.log ↑n"},
+	}
+	n := &node.Node{Slug: "m", Lean: map[string]string{"module": "Algo.M", "cost": "Algo.M.cost"}, Complexity: &node.Complexity{
+		Time:  map[string]string{"worst": "Θ(n log n)", "best": "Θ(n)"},
+		Space: map[string]string{"extra": "Θ(n)"},
+	}}
+	var got []string
+	for _, f := range CheckClaims(n, ds) {
+		got = append(got, f.String())
+	}
+	want := "L05 m time.best: Θ(n) has no class lemma in Algo.M"
+	if strings.Join(got, "\n") != want {
+		t.Errorf("CheckClaims = %q, want %q", got, want)
+	}
+	delete(n.Lean, "cost")
+	if fs := CheckClaims(n, ds); len(fs) != 0 {
+		t.Errorf("a node without lean.cost gets findings: %v", fs)
+	}
+}

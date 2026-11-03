@@ -33,6 +33,7 @@ type NodePage struct {
 	Solvers  []SolverRow
 	Impls    []ImplView
 	Proofs   []ProofView
+	Lean     *LeanView
 	Player   *PlayerView
 	Sources  []SourceView
 	Edit     string
@@ -222,6 +223,14 @@ func (b *builder) nodes() error {
 				return err
 			}
 		}
+		if p.Lean != nil {
+			lp := *p
+			lp.Base = b.base("Lean: "+n.Name, "The Lean model, specification and proofs of "+n.Name+".", p.Lean.URL)
+			lp.Hue, lp.Crumbs = p.Hue, append(slices.Clone(p.Crumbs), Link{Name: n.Name, URL: "/" + n.Slug + "/"})
+			if err := b.page("lean", lp.Path, lp); err != nil {
+				return err
+			}
+		}
 		if p.Player != nil {
 			for _, kind := range []string{"visualize", "embed"} {
 				vp := *p
@@ -295,6 +304,14 @@ func (b *builder) nodePage(n *node.Node) (*NodePage, error) {
 			} else {
 				html = insertBefore(html, b.snippet("known-algorithms", p), "bounds", "reductions", "applications", "references")
 			}
+		}
+	}
+	p.Lean = b.leanView(n)
+	if p.Lean != nil {
+		if hasH2(html, "formal-proof") {
+			html = insertAfterSection(html, b.snippet("formal-body", p), "formal-proof")
+		} else {
+			html = insertBefore(html, b.snippet("formal-section", p), "history", "exercises", "references")
 		}
 	}
 	if len(p.Impls) > 0 {
