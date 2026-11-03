@@ -364,7 +364,9 @@ func cmdTest(args []string) error {
 	root := f.String("root", ".", "the root of the content repository")
 	only := f.String("lang", "", "a comma list of languages to test; the default is all")
 	out := f.String("out", "build/results", "the directory for the results")
-	unsafe := f.Bool("unsafe-local", false, "run the tests on this machine; CI sets CI=true instead")
+	unsafe := f.Bool("unsafe-local", false, "run the tests on this machine, not in the sandbox; CI sets CI=true instead")
+	sandbox := f.String("sandbox", "auto", "the container engine of the sandbox: docker, podman, or none; auto uses docker when the image manifest is there (08.7)")
+	images := f.String("images", "manifests/images.yaml", "the manifest of the runner images, pinned by digest")
 	keep := f.Bool("keep", false, "keep the temporary directories")
 	changed := f.String("changed", "", "test only the implementations that changed since this git ref, for example origin/main (09.8)")
 	cacheDir := f.String("cache", "", "keep the results of passing tests in this directory, and reuse them while the inputs stay the same")
@@ -374,12 +376,16 @@ func cmdTest(args []string) error {
 	if *changed != "" && f.NArg() > 0 {
 		return usageError{"give slugs or -changed, not both"}
 	}
-	if !*unsafe && os.Getenv("CI") != "true" {
-		return usageError{"the tests run code from the repository; use a container or CI, or give -unsafe-local"}
-	}
 	c, err := load(*root)
 	if err != nil {
 		return err
+	}
+	box, err := openSandbox(*sandbox, under(c.Root, *images), *unsafe)
+	if err != nil {
+		return err
+	}
+	if box == nil && !*unsafe && os.Getenv("CI") != "true" {
+		return usageError{"the tests run code from the repository; use the sandbox or CI, or give -unsafe-local"}
 	}
 	nodes, err := selectNodes(c, f.Args())
 	if err != nil {
@@ -389,7 +395,19 @@ func cmdTest(args []string) error {
 	if err != nil {
 		return err
 	}
-	r := &lang.Runner{Keep: *keep, Log: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }}
+	r := &lang.Runner{Keep: *keep, Box: box, Log: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }}
+	if box != nil {
+		// The engine mounts the build trees at their own paths, so they must be in a directory that it can see. The system temporary directory of macOS is not.
+		abs, err := filepath.Abs(filepath.Join(c.Root, "build", "sandbox"))
+		if err != nil {
+			return err
+		}
+		r.TempDir = abs
+		if err := os.MkdirAll(r.TempDir, 0o755); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "the tests run in %s containers with the images of %s\n", box.Engine, *images)
+	}
 	problems := contractsOf(c)
 	var aff affected
 	if *changed != "" {
@@ -430,7 +448,7 @@ func cmdTest(args []string) error {
 			if !ok {
 				continue
 			}
-			if err := rc.Available(); err != nil {
+			if err := r.Available(rc); err != nil {
 				var skip lang.Skip
 				if errors.As(err, &skip) {
 					fmt.Fprintf(os.Stderr, "skip %s/%s: %v\n", n.Slug, im.Lang, err)
@@ -440,7 +458,7 @@ func cmdTest(args []string) error {
 			}
 			res := byLang[im.Lang]
 			if res == nil {
-				res = &status.Results{Lang: im.Lang, Version: rc.ToolVersion()}
+				res = &status.Results{Lang: im.Lang, Version: r.ToolVersion(rc)}
 				byLang[im.Lang] = res
 			}
 			var key string
@@ -449,7 +467,12 @@ func cmdTest(args []string) error {
 				for _, p := range problems(n) {
 					ks = append(ks, p.k)
 				}
-				key = tc.key(res.Version, n, im, ks)
+				tool := res.Version
+				if box != nil {
+					// The image can change while the version line stays the same, for example with a new pytest.
+					tool += " image " + box.Images[im.Lang]
+				}
+				key = tc.key(tool, n, im, ks)
 				if t, ok := tc.Get(im.Lang, key); ok {
 					fmt.Printf("pass %s/%s native tests and shared cases (cached)\n", n.Slug, im.Lang)
 					res.Tests = append(res.Tests, t)
@@ -511,6 +534,28 @@ func cmdTest(args []string) error {
 		return errFindings
 	}
 	return nil
+}
+
+// openSandbox returns the sandbox of the mode, or nil for host mode.
+func openSandbox(mode, manifest string, unsafe bool) (*lang.Sandbox, error) {
+	if unsafe || mode == "none" {
+		return nil, nil
+	}
+	switch mode {
+	case "auto":
+		if _, err := os.Stat(manifest); err != nil {
+			return nil, nil
+		}
+		mode = "docker"
+	case "docker", "podman":
+	default:
+		return nil, usageError{"-sandbox is docker, podman, none or auto, not " + mode}
+	}
+	imgs, err := lang.LoadImages(manifest)
+	if err != nil {
+		return nil, err
+	}
+	return lang.NewSandbox(mode, imgs), nil
 }
 
 // selectNodes returns the nodes with the slugs, or all nodes when no slug is given.

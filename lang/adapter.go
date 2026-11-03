@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -109,11 +108,12 @@ func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases 
 		s.Error = "no adapter for the language " + im.Lang
 		return s
 	}
-	dir, err := os.MkdirTemp("", "algo-shared-"+im.Lang+"-")
+	dir, err := os.MkdirTemp(r.TempDir, "algo-shared-"+im.Lang+"-")
 	if err != nil {
 		s.Error = err.Error()
 		return s
 	}
+	defer r.reap()
 	if r.Keep {
 		r.logf("keep %s", dir)
 	} else {
@@ -143,7 +143,13 @@ func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases 
 
 	var custom *contract.Custom
 	if k.Checker.Kind == "custom" {
-		if custom, err = k.StartCustom(); err != nil {
+		if r.Box != nil {
+			if err := r.Box.Ready("python"); err != nil {
+				s.Error = "the custom checker runs in the Python image: " + err.Error()
+				return s
+			}
+		}
+		if custom, err = k.StartCustom(r.checkerArgv(k)); err != nil {
 			s.Error = err.Error()
 			return s
 		}
@@ -172,7 +178,7 @@ func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases 
 			continue
 		}
 		if p == nil {
-			if p, err = startAdapter(dir, run); err != nil {
+			if p, err = r.startAdapter(im.Lang, dir, run); err != nil {
 				s.Error = err.Error()
 				return s
 			}
@@ -246,10 +252,8 @@ func (r *Runner) buildAdapter(gen generator, dir string, n *node.Node, im node.I
 	defer cancel()
 	for _, c := range j.Build {
 		var out bytes.Buffer
-		cmd := exec.CommandContext(ctx, c[0], c[1:]...)
-		cmd.Dir = dir
+		cmd := r.command(ctx, im.Lang, dir, c)
 		cmd.Stdout, cmd.Stderr = &out, &out
-		cmd.Env = append(os.Environ(), testEnv...)
 		if err := cmd.Run(); err != nil {
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return nil, fmt.Errorf("the adapter build took more than %s", Timeout)
@@ -266,7 +270,24 @@ func (r *Runner) buildAdapter(gen generator, dir string, n *node.Node, im node.I
 	return j.Run, nil
 }
 
-func startAdapter(dir string, run []string) (*jsonl.Proc, error) {
+// checkerArgv runs the custom checker of k in the Python image, with the problem directory mounted read-only. The checker is code from the content repository too.
+func (r *Runner) checkerArgv(k *contract.Contract) func([]string) []string {
+	if r.Box == nil {
+		return nil
+	}
+	return func(argv []string) []string {
+		dir, err := filepath.Abs(k.Dir)
+		if err != nil {
+			dir = k.Dir
+		}
+		return r.Box.Argv("python", true, []Mount{{Dir: dir, ReadOnly: true}}, argv)
+	}
+}
+
+func (r *Runner) startAdapter(lang, dir string, run []string) (*jsonl.Proc, error) {
+	if r.Box != nil {
+		run = r.Box.Argv(lang, true, []Mount{{Dir: dir}}, run)
+	}
 	p, err := jsonl.Start(dir, run, testEnv)
 	if err != nil {
 		return nil, fmt.Errorf("start the adapter: %w", err)

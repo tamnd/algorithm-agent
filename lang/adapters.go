@@ -958,7 +958,7 @@ fun main() {
 
 func kotlinAdapter(j *adapterJob) error {
 	fn := camel(j.Node.Slug)
-	stdlib, err := kotlinStdlib()
+	stdlib, err := j.r.kotlinStdlib()
 	if err != nil {
 		return err
 	}
@@ -1095,7 +1095,7 @@ const csharpProj = `<Project Sdk="Microsoft.NET.Sdk">
 
 func csharpAdapter(j *adapterJob) error {
 	fn := pascal(j.Node.Slug) + "." + pascal(j.K.Entry)
-	major, err := dotnetMajor()
+	major, err := j.r.dotnetMajor()
 	if err != nil {
 		return err
 	}

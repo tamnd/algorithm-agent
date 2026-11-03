@@ -210,13 +210,17 @@ for line in sys.stdin:
     sys.stdout.flush()
 `
 
-// StartCustom starts the checker of the contract.
-func (k *Contract) StartCustom() (*Custom, error) {
+// StartCustom starts the checker of the contract. A non-nil wrap changes the command, so that the checker can run in a sandbox.
+func (k *Contract) StartCustom(wrap func(argv []string) []string) (*Custom, error) {
 	path, err := filepath.Abs(filepath.Join(k.Dir, "checker.py"))
 	if err != nil {
 		return nil, err
 	}
-	p, err := jsonl.Start(k.Dir, []string{"python3", "-I", "-B", "-c", harness, path}, nil)
+	argv := []string{"python3", "-I", "-B", "-c", harness, path}
+	if wrap != nil {
+		argv = wrap(argv)
+	}
+	p, err := jsonl.Start(k.Dir, argv, nil)
 	if err != nil {
 		return nil, fmt.Errorf("start the checker: %w", err)
 	}

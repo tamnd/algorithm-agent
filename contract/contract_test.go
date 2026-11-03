@@ -184,7 +184,7 @@ func TestCustom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cu, err := k.StartCustom()
+	cu, err := k.StartCustom(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

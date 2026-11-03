@@ -42,7 +42,7 @@ The exit codes are: 0 for success, 1 when a check finds a problem, 2 for a usage
 
 ## Safety of `algo test`
 
-`algo test` compiles and runs code from the content tree. On your computer it runs only with the flag `-unsafe-local`. Use it only on code that you have read. In CI, each language runs in its own job with no secrets.
+`algo test` compiles and runs code from the content tree. When the content repository has `manifests/images.yaml`, each build, test, adapter and custom checker runs in a new container of a runner image, with no network, a read-only root and limits on memory, CPU and processes. The images are in [images/](images/README.md). Give `-sandbox podman` to use Podman. Without the sandbox, `algo test` runs on your computer only with the flag `-unsafe-local`. Use it only on code that you have read. In CI, each language runs in its own job with no secrets.
 
 ## Layout
 

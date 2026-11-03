@@ -63,6 +63,43 @@ type Runner struct {
 	Log func(format string, args ...any)
 	// Keep keeps the temporary directories, for debugging.
 	Keep bool
+	// Box runs the commands in containers. A nil Box runs them on this machine.
+	Box *Sandbox
+	// TempDir holds the build trees. The default is the temporary directory of the system. A sandbox needs a directory that the container engine can mount.
+	TempDir string
+}
+
+// Available tells if the language can run with this runner. In a sandbox, the image replaces the tools of this machine.
+func (r *Runner) Available(rc Recipe) error {
+	if r.Box != nil {
+		return r.Box.Ready(rc.ID)
+	}
+	return rc.Available()
+}
+
+// ToolVersion returns the version of the toolchain that runs the tests of the language.
+func (r *Runner) ToolVersion(rc Recipe) string {
+	if r.Box != nil {
+		return r.Box.Version(rc.ID, rc.Version)
+	}
+	return rc.ToolVersion()
+}
+
+// command returns the command c for the language, in dir. In a sandbox, it runs in a new container.
+func (r *Runner) command(ctx context.Context, lang, dir string, c []string) *exec.Cmd {
+	if r.Box != nil {
+		c = r.Box.Argv(lang, false, []Mount{{Dir: dir}}, c)
+	}
+	cmd := exec.CommandContext(ctx, c[0], c[1:]...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), testEnv...)
+	return cmd
+}
+
+func (r *Runner) reap() {
+	if r.Box != nil {
+		r.Box.Reap()
+	}
 }
 
 // Skip is the error of a language whose tools are missing.
@@ -110,7 +147,7 @@ func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 		return t
 	}
 	start := time.Now()
-	dir, err := os.MkdirTemp("", "algo-test-"+im.Lang+"-")
+	dir, err := os.MkdirTemp(r.TempDir, "algo-test-"+im.Lang+"-")
 	if err != nil {
 		t.Output = err.Error()
 		return t
@@ -118,6 +155,7 @@ func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 	if !r.Keep {
 		defer os.RemoveAll(dir)
 	}
+	defer r.reap()
 	tree, err := r.Gen(dir, n, im)
 	if err != nil {
 		t.Output = err.Error()
@@ -130,10 +168,8 @@ func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 	var out bytes.Buffer
 	t.Pass = true
 	for _, c := range cmds {
-		cmd := exec.CommandContext(ctx, c[0], c[1:]...)
-		cmd.Dir = dir
+		cmd := r.command(ctx, im.Lang, dir, c)
 		cmd.Stdout, cmd.Stderr = &out, &out
-		cmd.Env = append(os.Environ(), testEnv...)
 		if err := cmd.Run(); err != nil {
 			t.Pass = false
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -179,8 +215,9 @@ func write(dir, name, content string) error {
 	return os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)
 }
 
-func python(_ *Runner, dir string, _ *node.Node, _ node.Impl) ([][]string, error) {
-	if err := exec.Command("python3", "-c", "import pytest").Run(); err != nil {
+func python(r *Runner, dir string, _ *node.Node, _ node.Impl) ([][]string, error) {
+	// The runner image has pytest.
+	if r.Box == nil && exec.Command("python3", "-c", "import pytest").Run() != nil {
 		return nil, Skip{"python", "pytest"}
 	}
 	return [][]string{{"python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "."}}, nil
@@ -251,6 +288,9 @@ func typescript(_ *Runner, dir string, _ *node.Node, im node.Impl) ([][]string, 
 
 // junit returns the path of the JUnit console launcher, and downloads it once.
 func (r *Runner) junit() (string, error) {
+	if r.Box != nil {
+		return imageJUnit, nil
+	}
 	cache := r.Cache
 	if cache == "" {
 		c, err := os.UserCacheDir()
@@ -301,8 +341,11 @@ func java(r *Runner, dir string, _ *node.Node, im node.Impl) ([][]string, error)
 	return [][]string{args, run}, nil
 }
 
-// kotlinStdlib returns the path of kotlin-stdlib.jar of the kotlinc on the PATH.
-func kotlinStdlib() (string, error) {
+// kotlinStdlib returns the path of kotlin-stdlib.jar of the kotlinc on the PATH, or in the image.
+func (r *Runner) kotlinStdlib() (string, error) {
+	if r.Box != nil {
+		return imageKotlinStdlib, nil
+	}
 	kc, err := exec.LookPath("kotlinc")
 	if err != nil {
 		return "", err
@@ -322,12 +365,16 @@ func kotlin(r *Runner, dir string, _ *node.Node, im node.Impl) ([][]string, erro
 	if err != nil {
 		return nil, err
 	}
-	stdlib, err := kotlinStdlib()
+	stdlib, err := r.kotlinStdlib()
 	if err != nil {
 		return nil, err
 	}
 	args := append([]string{"kotlinc", "-Werror", "-cp", jar, "-d", "out"}, all(im, ".kt")...)
-	cp := "out" + string(os.PathListSeparator) + stdlib
+	sep := string(os.PathListSeparator)
+	if r.Box != nil {
+		sep = ":"
+	}
+	cp := "out" + sep + stdlib
 	run := []string{"java", "-jar", jar, "execute", "--class-path", cp, "--scan-class-path", "--disable-banner", "--details=summary", "--fail-if-no-tests"}
 	return [][]string{args, run}, nil
 }
@@ -349,17 +396,25 @@ const csproj = `<Project Sdk="Microsoft.NET.Sdk">
 `
 
 // dotnetMajor returns the major version of the .NET SDK, such as 10.
-func dotnetMajor() (string, error) {
-	out, err := exec.Command("dotnet", "--version").Output()
-	if err != nil {
-		return "", err
+func (r *Runner) dotnetMajor() (string, error) {
+	v := ""
+	if r.Box != nil {
+		if v = r.Box.Version("csharp", []string{"dotnet", "--version"}); v == "" {
+			return "", fmt.Errorf("csharp: no dotnet in the image")
+		}
+	} else {
+		out, err := exec.Command("dotnet", "--version").Output()
+		if err != nil {
+			return "", err
+		}
+		v = string(out)
 	}
-	major, _, _ := strings.Cut(strings.TrimSpace(string(out)), ".")
+	major, _, _ := strings.Cut(strings.TrimSpace(v), ".")
 	return major, nil
 }
 
-func csharp(_ *Runner, dir string, _ *node.Node, _ node.Impl) ([][]string, error) {
-	major, err := dotnetMajor()
+func csharp(r *Runner, dir string, _ *node.Node, _ node.Impl) ([][]string, error) {
+	major, err := r.dotnetMajor()
 	if err != nil {
 		return nil, err
 	}
