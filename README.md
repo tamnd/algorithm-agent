@@ -30,6 +30,7 @@ Run these commands in a clone of tamnd/algorithm.
 | `algo mv <slug> <new-slug>` | Renames a node. It changes each edge and each link that names the old slug, and adds the old slug to `registers/aliases.reg`, so the old URL redirects. Give an area such as `sorting/comparison-sorts` to move the node to another area. The tag does not change. |
 | `algo check` | Runs the audit rules. Add `-changed origin/main` to check only the nodes that a branch changes. |
 | `algo status binary-search` | Shows the ladders of a node and what the next level needs. |
+| `algo gen -lang rust` | Writes the build tree of each language to `build/lang/<lang>/`: a copy of each implementation, its build files, `algo-test.sh` and the adapters. `SOURCES` maps each file back to the node. |
 | `algo test -unsafe-local binary-search` | Runs the native tests of the implementations, then the shared cases of each problem that the node solves. A wrong result names the case and the language. |
 | `algo viz check` | Builds each scene and runs each preset two times. |
 | `algo site serve` | Renders the site and serves it at http://localhost:8150. It renders again when a file changes. |
@@ -52,7 +53,7 @@ The exit codes are: 0 for success, 1 when a check finds a problem, 2 for a usage
 | `check` | The audit rules of spec part 13. |
 | `status` | The ladders of a node. |
 | `contract` | Reads the contract and the shared cases of a problem, and decides if an output is right. |
-| `lang` | Runs the native tests and the adapters for each language. The JSON codecs of the adapters are in `lang/codec`, under the MIT licence. |
+| `lang` | Writes the build trees, and runs the native tests and the adapters for each language. Errors show the node paths, not the paths of the tree. The JSON codecs of the adapters are in `lang/codec`, under the MIT licence. |
 | `viz` | Bundles the scenes with esbuild and checks them in a JavaScript runtime. |
 | `markup` | Markdown, pseudocode and math. |
 | `katex` | Renders TeX to HTML on the server. |

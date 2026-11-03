@@ -101,8 +101,7 @@ func (rc Recipe) ToolVersion() string {
 // Test runs the native tests of one implementation.
 func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 	t := status.Test{Slug: n.Slug, Lang: im.Lang}
-	rc, ok := Recipes[im.Lang]
-	if !ok {
+	if _, ok := Recipes[im.Lang]; !ok {
 		t.Output = "no recipe for the language " + im.Lang
 		return t
 	}
@@ -119,16 +118,13 @@ func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 	if !r.Keep {
 		defer os.RemoveAll(dir)
 	}
-	if err := stage(dir, im, true); err != nil {
-		t.Output = err.Error()
-		return t
-	}
-	cmds, err := rc.Run(r, dir, n, im)
+	tree, err := r.Gen(dir, n, im)
 	if err != nil {
 		t.Output = err.Error()
 		t.Ms = time.Since(start).Milliseconds()
 		return t
 	}
+	cmds := tree.Test
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
 	var out bytes.Buffer
@@ -147,7 +143,7 @@ func (r *Runner) Test(n *node.Node, im node.Impl) status.Test {
 		}
 	}
 	t.Ms = time.Since(start).Milliseconds()
-	t.Output = tail(out.String(), 4000)
+	t.Output = tail(tree.Rewrite(out.String()), 4000)
 	return t
 }
 
@@ -210,16 +206,12 @@ func rust(_ *Runner, dir string, n *node.Node, im node.Impl) ([][]string, error)
 	if len(main) == 0 {
 		return nil, errors.New("rust: no source file")
 	}
-	// A test file is an integration test. It goes to tests/ and imports the crate.
-	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0o755); err != nil {
-		return nil, err
-	}
+	// A test file is an integration test that imports the crate. Cargo finds it by its [[test]] entry, so the file stays where the node has it.
+	toml := fmt.Sprintf("[package]\nname = %q\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\nautotests = false\n\n[lib]\npath = %q\n", crate(n.Slug), main[0])
 	for _, t := range files(im, true, ".rs") {
-		if err := os.Rename(filepath.Join(dir, t), filepath.Join(dir, "tests", filepath.Base(t))); err != nil {
-			return nil, err
-		}
+		toml += fmt.Sprintf("\n[[test]]\nname = %q\npath = %q\n", stem(t), t)
 	}
-	toml := fmt.Sprintf("[package]\nname = %q\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n[lib]\npath = %q\n\n[lints.rust]\nwarnings = \"deny\"\n", crate(n.Slug), main[0])
+	toml += "\n[lints.rust]\nwarnings = \"deny\"\n"
 	if err := write(dir, "Cargo.toml", toml); err != nil {
 		return nil, err
 	}

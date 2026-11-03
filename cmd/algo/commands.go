@@ -383,50 +383,16 @@ func cmdTest(args []string) error {
 	if err != nil {
 		return err
 	}
-	var nodes []*node.Node
-	if f.NArg() == 0 {
-		nodes = c.Nodes
+	nodes, err := selectNodes(c, f.Args())
+	if err != nil {
+		return err
 	}
-	for _, s := range f.Args() {
-		n := c.BySlug[s]
-		if n == nil {
-			return usageError{fmt.Sprintf("no node has the slug %q", s)}
-		}
-		nodes = append(nodes, n)
-	}
-	want := map[string]bool{}
-	for _, l := range strings.Split(*only, ",") {
-		if l = strings.TrimSpace(l); l != "" {
-			if _, ok := lang.Recipes[l]; !ok {
-				return usageError{fmt.Sprintf("no test recipe for the language %q", l)}
-			}
-			want[l] = true
-		}
+	want, err := langSet(*only)
+	if err != nil {
+		return err
 	}
 	r := &lang.Runner{Keep: *keep, Log: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }}
-	// The contract of each problem is read once. A contract that does not load is an error of the run, because every test against it would be wrong.
-	contracts := map[string]*sharedCases{}
-	problems := func(n *node.Node) []*sharedCases {
-		var out []*sharedCases
-		for _, s := range n.Solves {
-			p := c.BySlug[s.Problem]
-			if p == nil || !contract.Exists(p.Dir) {
-				continue
-			}
-			sc, ok := contracts[p.Slug]
-			if !ok {
-				k, cases, err := contract.Load(p.Dir)
-				if err != nil {
-					sc = &sharedCases{err: err}
-				} else {
-					sc = &sharedCases{k: k, cases: cases}
-				}
-				contracts[p.Slug] = sc
-			}
-			out = append(out, sc)
-		}
-		return out
-	}
+	problems := contractsOf(c)
 	for _, n := range nodes {
 		for _, p := range problems(n) {
 			if p.err != nil {
@@ -479,7 +445,7 @@ func cmdTest(args []string) error {
 			res.Tests = append(res.Tests, t)
 		}
 	}
-	dir := filepath.Join(*root, *out)
+	dir := under(*root, *out)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -504,6 +470,62 @@ func cmdTest(args []string) error {
 }
 
 // sharedCases is the contract of one problem and its cases.
+// selectNodes returns the nodes with the slugs, or all nodes when no slug is given.
+func selectNodes(c *node.Corpus, slugs []string) ([]*node.Node, error) {
+	if len(slugs) == 0 {
+		return c.Nodes, nil
+	}
+	var nodes []*node.Node
+	for _, s := range slugs {
+		n := c.BySlug[s]
+		if n == nil {
+			return nil, usageError{fmt.Sprintf("no node has the slug %q", s)}
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, nil
+}
+
+// langSet reads a comma list of languages. An empty list gives an empty set, which means all languages.
+func langSet(only string) (map[string]bool, error) {
+	want := map[string]bool{}
+	for _, l := range strings.Split(only, ",") {
+		if l = strings.TrimSpace(l); l != "" {
+			if _, ok := lang.Recipes[l]; !ok {
+				return nil, usageError{fmt.Sprintf("no recipe for the language %q", l)}
+			}
+			want[l] = true
+		}
+	}
+	return want, nil
+}
+
+// contractsOf returns a function that gives the contracts of the problems that a node solves. The contract of each problem is read once. A contract that does not load is an error of the run, because every test against it would be wrong.
+func contractsOf(c *node.Corpus) func(n *node.Node) []*sharedCases {
+	contracts := map[string]*sharedCases{}
+	return func(n *node.Node) []*sharedCases {
+		var out []*sharedCases
+		for _, s := range n.Solves {
+			p := c.BySlug[s.Problem]
+			if p == nil || !contract.Exists(p.Dir) {
+				continue
+			}
+			sc, ok := contracts[p.Slug]
+			if !ok {
+				k, cases, err := contract.Load(p.Dir)
+				if err != nil {
+					sc = &sharedCases{err: err}
+				} else {
+					sc = &sharedCases{k: k, cases: cases}
+				}
+				contracts[p.Slug] = sc
+			}
+			out = append(out, sc)
+		}
+		return out
+	}
+}
+
 type sharedCases struct {
 	k     *contract.Contract
 	cases []contract.Case
@@ -681,7 +703,7 @@ func cmdSite(args []string) error {
 		return err
 	}
 	opt := site.Options{
-		Out:      filepath.Join(*root, *out),
+		Out:      under(*root, *out),
 		BaseURL:  strings.TrimRight(*base, "/"),
 		Results:  filepath.Join(*root, *results),
 		SpecDir:  *spec,
@@ -845,4 +867,12 @@ func checkLinks(dir string) ([]string, error) {
 	})
 	sort.Strings(bad)
 	return bad, err
+}
+
+// under returns the path p under root. An absolute p stays as it is.
+func under(root, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(root, p)
 }

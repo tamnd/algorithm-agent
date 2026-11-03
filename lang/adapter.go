@@ -254,7 +254,13 @@ func (r *Runner) buildAdapter(gen generator, dir string, n *node.Node, im node.I
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return nil, fmt.Errorf("the adapter build took more than %s", Timeout)
 			}
-			return nil, fmt.Errorf("the adapter does not build (%s): %s", strings.Join(c[:1], " "), tail(out.String(), 1500))
+			src := Tree{Dir: dir, Sources: map[string]string{}}
+			for _, f := range im.Files {
+				if !f.Test {
+					src.Sources[f.Name] = f.Path
+				}
+			}
+			return nil, fmt.Errorf("the adapter does not build (%s): %s", strings.Join(c[:1], " "), tail(src.Rewrite(out.String()), 1500))
 		}
 	}
 	return j.Run, nil

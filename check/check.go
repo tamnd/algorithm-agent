@@ -6,6 +6,8 @@ package check
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -62,6 +64,7 @@ var Rules = map[string]string{
 	"I10": "each implementation and test file starts with the SPDX header",
 	"I11": "each line id of the main pseudocode has a marker in each tier-1 implementation",
 	"I12": "each implementation language is in the register",
+	"I15": "no generated file under build/ is committed, and no implementation has a build file; algo gen writes them",
 	"X01": "each link in a node to /<slug>/ names a node, an area or a site page",
 	"X06": "no node slug is a reserved word, a language id or an area id",
 }
@@ -102,6 +105,7 @@ func Run(c *node.Corpus, opt Options) []Finding {
 	}
 	r.tags()
 	r.oldSlugs()
+	r.committedBuild()
 	slugs := map[string][]*node.Node{}
 	for _, n := range c.Nodes {
 		slugs[n.Slug] = append(slugs[n.Slug], n)
@@ -487,6 +491,9 @@ func (r *run) impls(n *node.Node) {
 		}
 		seen := map[string]bool{}
 		for _, f := range im.Files {
+			if node.IsBuildFile(f.Name) {
+				r.add("I15", Block, f.Path, 0, "%s is a build file; algo gen writes it in build/lang (08.5)", path.Base(f.Name))
+			}
 			if !strings.Contains(firstLines(f.Content, 4), "SPDX-License-Identifier: MIT") {
 				r.add("I10", Block, f.Path, 1, "the file does not start with the SPDX header (08.11)")
 			}
@@ -591,6 +598,19 @@ func (r *run) oldSlugs() {
 	for _, o := range olds {
 		if to := r.c.OldSlugs[o]; r.c.BySlug[to] == nil {
 			r.add("T03", Block, "registers/aliases.reg", 0, "the old slug %q points to %q, but no node has that slug", o, to)
+		}
+	}
+}
+
+// committedBuild finds files under build/ that git tracks (rule I15). The check runs only in a git work tree.
+func (r *run) committedBuild() {
+	out, err := exec.Command("git", "-C", r.root, "ls-files", "-z", "--", "build").Output()
+	if err != nil {
+		return
+	}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			r.add("I15", Block, p, 0, "the file is under build/, which only the build writes; remove it with git rm --cached")
 		}
 	}
 }

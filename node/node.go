@@ -376,3 +376,21 @@ func readScene(root string, n *Node) error {
 	}
 	return nil
 }
+
+// BuildFiles are the names of the files that the generator writes (spec 08.5). Rule I15 refuses them in the content repo.
+var BuildFiles = []string{
+	"go.mod", "go.sum", "go.work", "Cargo.toml", "Cargo.lock", "package.json", "package-lock.json", "tsconfig.json",
+	"pyproject.toml", "setup.py", "setup.cfg", "conftest.py", "pom.xml", "build.gradle", "build.gradle.kts",
+	"settings.gradle", "settings.gradle.kts", "CMakeLists.txt", "Makefile", "Directory.Build.props",
+}
+
+// IsBuildFile tells if a file name is a build file of a language, such as go.mod or a .csproj file.
+func IsBuildFile(name string) bool {
+	b := filepath.Base(name)
+	for _, f := range BuildFiles {
+		if b == f {
+			return true
+		}
+	}
+	return strings.HasSuffix(b, ".csproj") || strings.HasSuffix(b, ".sln") || strings.HasSuffix(b, ".fsproj")
+}

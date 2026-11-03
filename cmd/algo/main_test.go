@@ -17,7 +17,7 @@ func TestExitCodes(t *testing.T) {
 		{[]string{"help"}, 0},
 		{nil, 2},
 		{[]string{"no-such-command"}, 2},
-		{[]string{"gen"}, 3},
+		{[]string{"lean"}, 3},
 		{[]string{"check", "-root", corpus}, 0},
 		{[]string{"check", "-root", "no-such-dir"}, 1},
 		{[]string{"check", "-no-such-flag"}, 2},

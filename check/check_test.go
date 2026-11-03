@@ -78,3 +78,27 @@ func TestMissingSlug(t *testing.T) {
 	}
 	t.Error("a see_also link to a missing node gave no G05 finding")
 }
+
+func TestBuildFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS("../testdata/corpus")); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(root, "nodes", "searching", "sequential-and-binary-search", "binary-search", "impl", "go", "go.mod")
+	if err := os.WriteFile(p, []byte("module x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := node.Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range Run(c, Options{}) {
+		if f.Rule == "I15" && f.Severity == Block && strings.HasSuffix(f.Path, "impl/go/go.mod") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no I15 finding for impl/go/go.mod")
+	}
+}
