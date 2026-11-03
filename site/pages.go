@@ -628,6 +628,10 @@ func (b *builder) machine() error {
 			a.Proofs = append(a.Proofs, pr.ID)
 		}
 		all = append(all, a)
+		groups[n.Kind] = append(groups[n.Kind], n)
+		if isStub(n) {
+			continue
+		}
 		data, err := json.MarshalIndent(a, "", "  ")
 		if err != nil {
 			return err
@@ -642,7 +646,6 @@ func (b *builder) machine() error {
 		if err := b.write("/"+n.Slug+".md", md); err != nil {
 			return err
 		}
-		groups[n.Kind] = append(groups[n.Kind], n)
 	}
 	for _, k := range kindOrder {
 		ns := groups[k]
@@ -652,6 +655,10 @@ func (b *builder) machine() error {
 		sort.Slice(ns, func(i, j int) bool { return ns[i].Name < ns[j].Name })
 		fmt.Fprintf(&llms, "\n## %s\n\n", title(kindName(k, true)))
 		for _, n := range ns {
+			if isStub(n) {
+				fmt.Fprintf(&llms, "- [%s](%s/%s/): %s\n", n.Name, b.opt.BaseURL, n.Slug, n.Summary)
+				continue
+			}
 			fmt.Fprintf(&llms, "- [%s](%s/%s.md): %s\n", n.Name, b.opt.BaseURL, n.Slug, n.Summary)
 		}
 	}

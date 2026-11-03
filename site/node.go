@@ -37,6 +37,7 @@ type NodePage struct {
 	Player   *PlayerView
 	Sources  []SourceView
 	Edit     string
+	Copies   bool // the page has the Markdown and JSON copies; a stub has none
 	History  string
 	Report   string
 	Tests    string // the summary line of the native tests
@@ -262,6 +263,7 @@ func (b *builder) nodePage(n *node.Node) (*NodePage, error) {
 	p.Crumbs = b.crumbs(n)
 	p.Status = b.status[n.Slug]
 	p.Edit = fmt.Sprintf("%s/edit/main/%s/node.md", b.opt.Repo, filepath.ToSlash(n.Rel))
+	p.Copies = !isStub(n)
 	p.History = fmt.Sprintf("%s/commits/main/%s", b.opt.Repo, filepath.ToSlash(n.Rel))
 	p.Report = b.opt.Repo + "/issues/new?" + url.Values{"template": {"error.yml"}, "title": {"Error on " + n.Name}, "url": {b.opt.BaseURL + "/" + n.Slug + "/"}}.Encode()
 	p.Prereqs = b.links(n.Prereqs)
@@ -724,4 +726,9 @@ func jsonLD(b *builder, n *node.Node) template.JS {
 	}
 	bs, _ := json.Marshal(m)
 	return template.JS(bs)
+}
+
+// isStub reports whether a node has no section yet. A stub has only its front matter and a lead, so the site gives it no Markdown or JSON copy. This keeps the file count of a large skeleton under the limit of the host.
+func isStub(n *node.Node) bool {
+	return !strings.HasPrefix(n.Body, "## ") && !strings.Contains(n.Body, "\n## ")
 }

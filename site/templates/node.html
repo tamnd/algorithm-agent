@@ -21,7 +21,7 @@
 {{range .Rungs}}<tr><th scope="row">{{.Ladder}}{{with .Lang}} ({{.}}){{end}}</th><td>{{template "rung" .Rung}} {{.Name}}</td><td>{{if .Next}}<ul>{{range .Next}}<li>{{.}}</li>{{end}}</ul>{{else}}This is the top level.{{end}}</td></tr>{{end}}
 </tbody></table>
 {{with .Tests}}<p>{{.}}</p>{{end}}
-<p class="page-links"><span>Tag <code>{{.N.Tag}}</code></span> <a href="{{.Edit}}">Edit this page</a> <a href="{{.History}}">History</a> <a href="{{.Report}}">Report an error</a> <a href="/{{.N.Slug}}.md">Markdown</a> <a href="/{{.N.Slug}}.json">JSON</a></p>
+<p class="page-links"><span>Tag <code>{{.N.Tag}}</code></span> <a href="{{.Edit}}">Edit this page</a> <a href="{{.History}}">History</a> <a href="{{.Report}}">Report an error</a> {{if .Copies}}<a href="/{{.N.Slug}}.md">Markdown</a> <a href="/{{.N.Slug}}.json">JSON</a>{{end}}</p>
 </section>
 </div>
 </div>
