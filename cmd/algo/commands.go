@@ -462,7 +462,7 @@ func cmdTest(args []string) error {
 	}
 	problems := contractsOf(c)
 	if *kind == "diff" {
-		d.root, d.box = c.Root, box
+		d.root, d.box, d.out = c.Root, box, under(*root, *out)
 		return runDiff(r, nodes, want, problems, d)
 	}
 	var aff affected

@@ -3,6 +3,10 @@
 package status
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tamnd/algorithm-agent/node"
@@ -29,5 +33,52 @@ func TestImplLadder(t *testing.T) {
 		if r.Level != tc.level {
 			t.Errorf("%s: level %d, want %d (next %v)", tc.name, r.Level, tc.level, r.Next)
 		}
+	}
+}
+
+func TestDiffNext(t *testing.T) {
+	tests := []struct {
+		name string
+		test Test
+		want string
+	}{
+		{"no run", Test{}, "did not run in this build"},
+		{"error", Test{Diff: []Diff{{Problem: "sorting-problem", Error: "the adapter does not build\nmore"}}}, "did not run: the adapter does not build"},
+		{"failure", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 8, Failures: []CaseFailure{{Case: "small-uniform-n4-s1-0"}}}}}, "fails on small-uniform-n4-s1-0 (I03)"},
+		{"pass", Test{Diff: []Diff{{Problem: "sorting-problem", Cases: 9, Passed: 9}}}, "mutation score"},
+	}
+	for _, tc := range tests {
+		got := diffNext(tc.test)
+		if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+			t.Errorf("%s: %q, want a message with %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestLoadResultsDiff(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, r Results) {
+		b, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("go.json", Results{Lang: "go", Tests: []Test{{Slug: "merge-sort", Lang: "go", Pass: true}}})
+	write("go.diff.json", Results{Lang: "go", Kind: "diff", Tests: []Test{
+		{Slug: "merge-sort", Lang: "go", Diff: []Diff{{Problem: "sorting-problem", Cases: 5, Passed: 5}}},
+		{Slug: "heap-sort", Lang: "go", Diff: []Diff{{Problem: "sorting-problem", Cases: 5, Passed: 5}}},
+	}})
+	res, err := LoadResults(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res["merge-sort"]["go"]; !got.Pass || len(got.Diff) != 1 || got.Diff[0].Passed != 5 {
+		t.Errorf("merge-sort/go = %+v, want the native result with the diff", got)
+	}
+	if _, ok := res["heap-sort"]; ok {
+		t.Errorf("heap-sort has a result, but it has only a differential run")
 	}
 }

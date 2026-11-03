@@ -51,6 +51,20 @@ type Test struct {
 	Ms     int64  `json:"ms"`
 	// Shared holds the results of the shared cases of each problem that the node solves (spec 09.2).
 	Shared []Shared `json:"shared,omitempty"`
+	// Diff holds the results of the differential run of each problem that the node solves (spec 09.5). It comes from the file <lang>.diff.json.
+	Diff []Diff `json:"diff,omitempty"`
+}
+
+// Diff is the result of the differential run of one problem on one implementation.
+type Diff struct {
+	Problem string `json:"problem"`
+	Cases   int    `json:"cases"`
+	Passed  int    `json:"passed"`
+	Skipped int    `json:"skipped,omitempty"`
+	// Failures holds the shrunk failures, at most lang.MaxDiffFailures.
+	Failures []CaseFailure `json:"failures,omitempty"`
+	// Error is set when the run could not start, for example when the adapter does not build.
+	Error string `json:"error,omitempty"`
 }
 
 // Shared is the result of the shared cases of one problem on one implementation.
@@ -92,7 +106,9 @@ type CaseFailure struct {
 type Results struct {
 	Lang    string `json:"lang"`
 	Version string `json:"version,omitempty"`
-	Tests   []Test `json:"tests"`
+	// Kind is "diff" for the file <lang>.diff.json of the differential run, and empty for the native tests and the shared cases.
+	Kind  string `json:"kind,omitempty"`
+	Tests []Test `json:"tests"`
 }
 
 // Review is a review record, reviews/<tag>/<part>.yaml (spec 13.2).
@@ -126,6 +142,7 @@ func LoadDecls(path string) (formal.Decls, error) {
 // LoadResults reads every build/results/*.json under dir. A missing dir gives no results.
 func LoadResults(dir string) (map[string]map[string]Test, error) {
 	out := map[string]map[string]Test{}
+	var diffs []Results
 	files, err := filepath.Glob(filepath.Join(dir, "*.json"))
 	if err != nil {
 		return nil, err
@@ -139,11 +156,24 @@ func LoadResults(dir string) (map[string]map[string]Test, error) {
 		if err := json.Unmarshal(b, &r); err != nil {
 			return nil, fmt.Errorf("%s: %w", f, err)
 		}
+		if r.Kind == "diff" {
+			diffs = append(diffs, r)
+			continue
+		}
 		for _, t := range r.Tests {
 			if out[t.Slug] == nil {
 				out[t.Slug] = map[string]Test{}
 			}
 			out[t.Slug][t.Lang] = t
+		}
+	}
+	// The differential runs add to the results of the native tests. A differential run without native results does not count as a test run.
+	for _, r := range diffs {
+		for _, t := range r.Tests {
+			if base, ok := out[t.Slug][t.Lang]; ok {
+				base.Diff = t.Diff
+				out[t.Slug][t.Lang] = base
+			}
 		}
 	}
 	return out, nil
@@ -407,9 +437,29 @@ func impl(n *node.Node, im node.Impl, env Env) (r Rung) {
 		}
 	}
 	if r.Level == 1 {
-		r.Next = append(r.Next, "I2 needs the differential and mutation runs (09.5, 09.6), which are M1 work")
+		r.Next = append(r.Next, diffNext(t)...)
 	}
 	return r
+}
+
+// diffNext says what an implementation at I1 needs for I2: a differential run that passes on each input (rule I03), then the mutation score (rule I04).
+func diffNext(t Test) []string {
+	if len(t.Diff) == 0 {
+		return []string{"I2 needs the differential run on the inputs of cases/generated.yaml (09.5); it did not run in this build"}
+	}
+	var out []string
+	for _, d := range t.Diff {
+		switch {
+		case d.Error != "":
+			out = append(out, "the differential run of "+d.Problem+" did not run: "+firstLine(d.Error))
+		case len(d.Failures) > 0:
+			out = append(out, fmt.Sprintf("the differential run of %s fails on %s (I03); add the shrunk case to cases/regress.jsonl and fix the code", d.Problem, d.Failures[0].Case))
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	return []string{"the differential run passes; I2 also needs a mutation score of at least 85% (09.6, I04), which is not measured yet"}
 }
 
 func firstLine(s string) string {

@@ -16,12 +16,13 @@ import (
 	"github.com/tamnd/algorithm-agent/contract"
 	"github.com/tamnd/algorithm-agent/lang"
 	"github.com/tamnd/algorithm-agent/node"
+	"github.com/tamnd/algorithm-agent/status"
 )
 
 type diffFlags struct {
 	classes, seeds string
 	write          bool
-	root           string
+	root, out      string
 	box            *lang.Sandbox
 }
 
@@ -107,6 +108,19 @@ func runDiff(r *lang.Runner, nodes []*node.Node, want map[string]bool, problems 
 		return pi
 	}
 	failed := 0
+	byLang := map[string]*status.Results{}
+	record := func(n *node.Node, l string, dr status.Diff) {
+		res := byLang[l]
+		if res == nil {
+			res = &status.Results{Lang: l, Kind: "diff"}
+			byLang[l] = res
+		}
+		if k := len(res.Tests); k == 0 || res.Tests[k-1].Slug != n.Slug {
+			res.Tests = append(res.Tests, status.Test{Slug: n.Slug, Lang: l})
+		}
+		t := &res.Tests[len(res.Tests)-1]
+		t.Diff = append(t.Diff, dr)
+	}
 	regress := map[string][]contract.Case{}
 	dirs := map[string]string{}
 	for _, n := range nodes {
@@ -142,6 +156,7 @@ func runDiff(r *lang.Runner, nodes []*node.Node, want map[string]bool, problems 
 				if err != nil {
 					fmt.Printf("FAIL %s/%s differential run of %s: %v\n", n.Slug, im.Lang, p.k.Problem, err)
 					failed++
+					record(n, im.Lang, status.Diff{Problem: p.k.Problem, Error: err.Error()})
 					continue
 				}
 				res, err := lang.Diff(ss, pi.in)
@@ -162,12 +177,31 @@ func runDiff(r *lang.Runner, nodes []*node.Node, want map[string]bool, problems 
 					line += fmt.Sprintf(", %d skipped", res.Skipped)
 				}
 				fmt.Printf("%s (%d ms)\n", line, res.Took.Milliseconds())
+				dr := status.Diff{Problem: p.k.Problem, Cases: res.Cases, Passed: res.Passed, Skipped: res.Skipped}
+				for _, f := range res.Failures {
+					dr.Failures = append(dr.Failures, status.CaseFailure{Case: f.Case.Name, Reason: f.Reason + "; it shrinks to the arguments " + short(argsJSON(f.Shrunk.Args)), Got: short(f.Got), Want: short(f.Case.Expect)})
+				}
+				record(n, im.Lang, dr)
 				for _, f := range res.Failures {
 					reg := lang.Regression(p.k, f, n.Slug+"/"+im.Lang, time.Now().UTC())
 					fmt.Println(indent(fmt.Sprintf("case %s: %s\n  got:  %s\n  want: %s\nshrunk in %d runs to %s: %s\n  args: %s\n  got:  %s\n  want: %s", f.Case.Name, f.Reason, short(f.Got), short(f.Case.Expect), f.Calls, reg.Name, f.ShrunkReason, short(argsJSON(reg.Args)), short(f.ShrunkGot), short(reg.Expect))))
 					regress[p.k.Problem] = append(regress[p.k.Problem], reg)
 					dirs[p.k.Problem] = p.k.Dir
 				}
+			}
+		}
+	}
+	if d.out != "" {
+		if err := os.MkdirAll(d.out, 0o755); err != nil {
+			return err
+		}
+		for l, res := range byLang {
+			var buf bytes.Buffer
+			if err := writeJSON(&buf, res); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(d.out, l+".diff.json"), buf.Bytes(), 0o644); err != nil {
+				return err
 			}
 		}
 	}
