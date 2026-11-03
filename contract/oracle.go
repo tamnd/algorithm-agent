@@ -18,14 +18,8 @@ var pyOracles = []string{"reference", "brute"}
 
 // OracleFile gives the Python oracle of the problem: the file that the field oracle.reference or oracle.brute names, or else reference.py or brute.py when it exists. It gives "" when the problem has no Python oracle.
 func (k *Contract) OracleFile() string {
-	for _, kind := range pyOracles {
-		name, _ := k.Oracle[kind].(string)
-		if name == "" {
-			name = kind + ".py"
-		}
-		if _, err := os.Stat(filepath.Join(k.Dir, name)); err == nil {
-			return name
-		}
+	if fs := k.OracleFiles(); len(fs) > 0 {
+		return fs[0]
 	}
 	return ""
 }
@@ -62,12 +56,32 @@ for line in sys.stdin:
 // ErrNoOracle is the error of StartOracle for a problem with no Python oracle.
 var ErrNoOracle = errors.New("the problem has no reference.py or brute.py")
 
+// OracleFiles gives each Python oracle of the problem that exists, in order of preference: the reference, then the brute force.
+func (k *Contract) OracleFiles() []string {
+	var out []string
+	for _, kind := range pyOracles {
+		name, _ := k.Oracle[kind].(string)
+		if name == "" {
+			name = kind + ".py"
+		}
+		if _, err := os.Stat(filepath.Join(k.Dir, name)); err == nil {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // StartOracle starts the Python oracle of the problem. A non-nil wrap changes the command, so that the oracle can run in a sandbox.
 func (k *Contract) StartOracle(wrap func(argv []string) []string) (*Oracle, error) {
 	file := k.OracleFile()
 	if file == "" {
 		return nil, ErrNoOracle
 	}
+	return k.StartOracleFile(file, wrap)
+}
+
+// StartOracleFile starts one Python oracle of the problem, from its file relative to the problem directory.
+func (k *Contract) StartOracleFile(file string, wrap func(argv []string) []string) (*Oracle, error) {
 	path, err := filepath.Abs(filepath.Join(k.Dir, file))
 	if err != nil {
 		return nil, err

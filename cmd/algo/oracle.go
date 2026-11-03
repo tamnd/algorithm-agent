@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/tamnd/algorithm-agent/contract"
 	"github.com/tamnd/algorithm-agent/lang"
@@ -79,6 +80,10 @@ func cmdOracle(args []string) error {
 			var fails int
 			fails, err = oracleCases(o, k, cases, box, s)
 			bad += fails
+			if err == nil {
+				fails, err = oraclesAgree(k, box, s)
+				bad += fails
+			}
 		}
 		o.Close()
 		if err != nil {
@@ -166,4 +171,94 @@ func oracleLines(o *contract.Oracle, k *contract.Contract, path string) error {
 		}
 	}
 	return sc.Err()
+}
+
+// oraclesAgree checks that the Python oracles of the problem agree with each other on each tiny and small input of each generator (rule S07). It needs two oracles and cases/generated.yaml; else it does nothing. The output of each other oracle must pass the checker with the output of the first oracle as expect.
+func oraclesAgree(k *contract.Contract, box *lang.Sandbox, slug string) (int, error) {
+	files := k.OracleFiles()
+	if len(files) < 2 {
+		return 0, nil
+	}
+	g, err := k.LoadGenerated()
+	if err != nil || g == nil {
+		return 0, err
+	}
+	wrap := lang.CheckerWrap(box, k)
+	gen, err := k.StartGenerator(wrap)
+	if err != nil {
+		return 0, err
+	}
+	defer gen.Close()
+	var oracles []*contract.Oracle
+	defer func() {
+		for _, o := range oracles {
+			o.Close()
+		}
+	}()
+	for _, f := range files {
+		o, err := k.StartOracleFile(f, wrap)
+		if err != nil {
+			return 0, err
+		}
+		oracles = append(oracles, o)
+	}
+	var custom *contract.Custom
+	if k.Checker.Kind == "custom" {
+		if custom, err = k.StartCustom(wrap); err != nil {
+			return 0, err
+		}
+		defer custom.Close()
+	}
+	var msgs []string
+	total := 0
+	for _, q := range g.Plan(k, []string{"tiny", "small"}, g.Seeds.PR) {
+		cs, err := gen.Make(q)
+		if err != nil {
+			return 0, err
+		}
+		for _, c := range cs {
+			total++
+			args, err := k.OracleArgs(c.Args, c.Type())
+			if err != nil {
+				return 0, err
+			}
+			want, err := oracles[0].Run(args, k.OutName())
+			if err != nil {
+				msgs = append(msgs, fmt.Sprintf("S07 case %s: %v", c.Name, err))
+				continue
+			}
+			c.Expect = want
+			for _, o := range oracles[1:] {
+				got, err := o.Run(args, k.OutName())
+				if err == nil {
+					var reason string
+					if reason, err = k.Verdict(c, got, custom); err == nil && reason != "" {
+						err = fmt.Errorf("%s gives %s and %s gives %s: %s", o.File, short(got), oracles[0].File, short(want), reason)
+					}
+				}
+				if err != nil {
+					msgs = append(msgs, fmt.Sprintf("S07 case %s %s: %v", c.Name, short(argsJSON(c.Args)), err))
+				}
+			}
+			if len(msgs) >= 5 {
+				break
+			}
+		}
+		if len(msgs) >= 5 {
+			break
+		}
+	}
+	state := "pass"
+	if len(msgs) > 0 {
+		state = "FAIL"
+	}
+	if len(msgs) >= 5 {
+		fmt.Printf("%-4s %s: the oracles %s disagree on %d of the first %d tiny and small inputs, and the check stops there\n", state, slug, strings.Join(files, ", "), len(msgs), total)
+	} else {
+		fmt.Printf("%-4s %s: the oracles %s agree on %d of %d tiny and small inputs\n", state, slug, strings.Join(files, ", "), total-len(msgs), total)
+	}
+	for _, m := range msgs {
+		fmt.Println(indent(m))
+	}
+	return len(msgs), nil
 }
