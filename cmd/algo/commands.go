@@ -248,24 +248,17 @@ func countOnly(c *node.Corpus, only map[string]bool) int {
 
 // changedSlugs gives the nodes with a file that changed between base and HEAD, or in the work tree.
 func changedSlugs(c *node.Corpus, base string) ([]string, error) {
-	var files []string
-	for _, a := range [][]string{{"diff", "--name-only", base + "...HEAD"}, {"diff", "--name-only", "HEAD"}, {"ls-files", "--others", "--exclude-standard"}} {
-		cmd := exec.Command("git", a...)
-		cmd.Dir = c.Root
-		out, err := cmd.Output()
-		if err != nil {
-			return nil, fmt.Errorf("git %s: %w", strings.Join(a, " "), err)
-		}
-		files = append(files, strings.Fields(string(out))...)
+	files, err := changedFiles(c.Root, base)
+	if err != nil {
+		return nil, err
 	}
-	seen := map[string]bool{}
 	var slugs []string
 	for _, n := range c.Nodes {
 		prefix := n.Rel + "/"
 		for _, p := range files {
-			if strings.HasPrefix(filepath.ToSlash(p), prefix) && !seen[n.Slug] {
-				seen[n.Slug] = true
+			if strings.HasPrefix(p, prefix) {
 				slugs = append(slugs, n.Slug)
+				break
 			}
 		}
 	}
@@ -373,8 +366,13 @@ func cmdTest(args []string) error {
 	out := f.String("out", "build/results", "the directory for the results")
 	unsafe := f.Bool("unsafe-local", false, "run the tests on this machine; CI sets CI=true instead")
 	keep := f.Bool("keep", false, "keep the temporary directories")
+	changed := f.String("changed", "", "test only the implementations that changed since this git ref, for example origin/main (09.8)")
+	cacheDir := f.String("cache", "", "keep the results of passing tests in this directory, and reuse them while the inputs stay the same")
 	if err := parse(f, args); err != nil {
 		return err
+	}
+	if *changed != "" && f.NArg() > 0 {
+		return usageError{"give slugs or -changed, not both"}
 	}
 	if !*unsafe && os.Getenv("CI") != "true" {
 		return usageError{"the tests run code from the repository; use a container or CI, or give -unsafe-local"}
@@ -393,6 +391,27 @@ func cmdTest(args []string) error {
 	}
 	r := &lang.Runner{Keep: *keep, Log: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }}
 	problems := contractsOf(c)
+	var aff affected
+	if *changed != "" {
+		files, err := changedFiles(c.Root, *changed)
+		if err != nil {
+			return err
+		}
+		aff = findAffected(c, files)
+		switch {
+		case aff.All:
+			fmt.Fprintf(os.Stderr, "all implementations run, because %s\n", aff.Why)
+		case len(aff.Langs) == 0:
+			fmt.Println("no implementation changed")
+			return nil
+		}
+	}
+	var tc *testCache
+	if *cacheDir != "" {
+		if tc, err = newTestCache(under(*root, *cacheDir), c.Root); err != nil {
+			return err
+		}
+	}
 	for _, n := range nodes {
 		for _, p := range problems(n) {
 			if p.err != nil {
@@ -404,7 +423,7 @@ func cmdTest(args []string) error {
 	failed := 0
 	for _, n := range nodes {
 		for _, im := range n.Impls {
-			if len(want) > 0 && !want[im.Lang] {
+			if len(want) > 0 && !want[im.Lang] || *changed != "" && !aff.Has(n, im.Lang) {
 				continue
 			}
 			rc, ok := lang.Recipes[im.Lang]
@@ -424,6 +443,19 @@ func cmdTest(args []string) error {
 				res = &status.Results{Lang: im.Lang, Version: rc.ToolVersion()}
 				byLang[im.Lang] = res
 			}
+			var key string
+			if tc != nil {
+				var ks []*contract.Contract
+				for _, p := range problems(n) {
+					ks = append(ks, p.k)
+				}
+				key = tc.key(res.Version, n, im, ks)
+				if t, ok := tc.Get(im.Lang, key); ok {
+					fmt.Printf("pass %s/%s native tests and shared cases (cached)\n", n.Slug, im.Lang)
+					res.Tests = append(res.Tests, t)
+					continue
+				}
+			}
 			t := r.Test(n, im)
 			state := "pass"
 			if !t.Pass {
@@ -442,6 +474,11 @@ func cmdTest(args []string) error {
 			if !t.OK() {
 				failed++
 			}
+			if tc != nil {
+				if err := tc.Put(im.Lang, key, t); err != nil {
+					return err
+				}
+			}
 			res.Tests = append(res.Tests, t)
 		}
 	}
@@ -451,7 +488,7 @@ func cmdTest(args []string) error {
 	}
 	for id, res := range byLang {
 		prev := filepath.Join(dir, id+".json")
-		if f.NArg() > 0 {
+		if f.NArg() > 0 || *changed != "" {
 			res.Tests = mergeTests(prev, res.Tests)
 		}
 		var buf bytes.Buffer
@@ -462,6 +499,13 @@ func cmdTest(args []string) error {
 			return err
 		}
 	}
+	if tc != nil && f.NArg() == 0 && *changed == "" {
+		langs := make([]string, 0, len(byLang))
+		for id := range byLang {
+			langs = append(langs, id)
+		}
+		tc.Prune(langs)
+	}
 	if failed > 0 {
 		fmt.Fprintf(os.Stderr, "%d implementations failed\n", failed)
 		return errFindings
@@ -469,7 +513,6 @@ func cmdTest(args []string) error {
 	return nil
 }
 
-// sharedCases is the contract of one problem and its cases.
 // selectNodes returns the nodes with the slugs, or all nodes when no slug is given.
 func selectNodes(c *node.Corpus, slugs []string) ([]*node.Node, error) {
 	if len(slugs) == 0 {
@@ -526,6 +569,7 @@ func contractsOf(c *node.Corpus) func(n *node.Node) []*sharedCases {
 	}
 }
 
+// sharedCases is the contract of one problem and its cases.
 type sharedCases struct {
 	k     *contract.Contract
 	cases []contract.Case

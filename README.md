@@ -31,7 +31,7 @@ Run these commands in a clone of tamnd/algorithm.
 | `algo check` | Runs the audit rules. Add `-changed origin/main` to check only the nodes that a branch changes. |
 | `algo status binary-search` | Shows the ladders of a node and what the next level needs. |
 | `algo gen -lang rust` | Writes the build tree of each language to `build/lang/<lang>/`: a copy of each implementation, its build files, `algo-test.sh` and the adapters. `SOURCES` maps each file back to the node. |
-| `algo test -unsafe-local binary-search` | Runs the native tests of the implementations, then the shared cases of each problem that the node solves. A wrong result names the case and the language. |
+| `algo test -unsafe-local binary-search` | Runs the native tests of the implementations, then the shared cases of each problem that the node solves. A wrong result names the case and the language. With `-changed origin/main`, only the implementations that a change touches run. With `-cache dir`, a result that passed is used again while algo, the toolchain, the files and the cases stay the same. |
 | `algo viz check` | Builds each scene and runs each preset two times. |
 | `algo site serve` | Renders the site and serves it at http://localhost:8150. It renders again when a file changes. |
 | `algo site check` | Renders the site and checks each internal link. |
