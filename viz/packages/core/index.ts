@@ -109,6 +109,233 @@ export class ArrayView {
   values(): Value[] { return this.data.slice(); }
 }
 
+export type Id = number | string;
+
+export interface GraphNode { id: Id; label?: string; x?: number; y?: number }
+export type GraphEdge = [Id, Id] | [Id, Id, number];
+
+export interface GraphInit {
+  nodes: (Id | GraphNode)[];
+  edges?: GraphEdge[];
+  directed?: boolean;
+  weighted?: boolean;
+  // fixed uses the x and y of each node, from 0 to 1. layered puts the nodes in the levels of a breadth-first search from the first node. circle is the default.
+  layout?: "fixed" | "layered" | "circle";
+  label?: string;
+}
+
+function key(u: Id, w: Id, directed: boolean): string {
+  const a = JSON.stringify(u), b = JSON.stringify(w);
+  return directed || a <= b ? a + ">" + b : b + ">" + a;
+}
+
+// GraphView is a graph of nodes and edges (spec 10.2.4). The player computes the place of each node once, from all the nodes that the trace adds, so a node never moves.
+export class GraphView {
+  private nodes = new Map<string, GraphNode>();
+  private edges = new Map<string, number | null>();
+  private adj = new Map<string, Id[]>();
+  constructor(private v: Viz, readonly name: string, readonly directed: boolean) {}
+  private need(u: Id): void {
+    if (!this.nodes.has(JSON.stringify(u))) throw new Error(`the graph ${this.name} has no node ${JSON.stringify(u)}`);
+  }
+  private needEdge(u: Id, w: Id): string {
+    const k = key(u, w, this.directed);
+    if (!this.edges.has(k)) throw new Error(`the graph ${this.name} has no edge ${JSON.stringify(u)}-${JSON.stringify(w)}`);
+    return k;
+  }
+  // init adds the nodes and edges of the create event, with no events of their own.
+  init(g: GraphInit): void {
+    for (const n of g.nodes) this.put(typeof n === "object" ? n : { id: n });
+    for (const e of g.edges ?? []) this.link(e[0], e[1], e.length > 2 ? (e[2] as number) : null);
+  }
+  private put(n: GraphNode): void {
+    const k = JSON.stringify(n.id);
+    if (this.nodes.has(k)) throw new Error(`the graph ${this.name} has the node ${k} twice`);
+    this.nodes.set(k, n);
+    this.adj.set(k, []);
+  }
+  private link(u: Id, w: Id, weight: number | null): void {
+    this.need(u); this.need(w);
+    const k = key(u, w, this.directed);
+    if (this.edges.has(k)) throw new Error(`the graph ${this.name} has the edge ${JSON.stringify(u)}-${JSON.stringify(w)} twice`);
+    this.edges.set(k, weight);
+    this.adj.get(JSON.stringify(u))!.push(w);
+    if (!this.directed) this.adj.get(JSON.stringify(w))!.push(u);
+  }
+  get size(): number { return this.nodes.size; }
+  ids(): Id[] { return [...this.nodes.values()].map((n) => n.id); }
+  // neighbors gives the nodes that an edge from u reaches, in the order of the edges. It is a read with no event; use edge to show it.
+  neighbors(u: Id): Id[] { this.need(u); return this.adj.get(JSON.stringify(u))!.slice(); }
+  weight(u: Id, w: Id): number | null { return this.edges.get(this.needEdge(u, w)) ?? null; }
+  addNode(n: Id | GraphNode): void {
+    const node = typeof n === "object" ? n : { id: n };
+    this.put(node);
+    this.v.emit(["graph.addNode", this.name, node]);
+  }
+  addEdge(u: Id, w: Id, weight?: number): void {
+    this.link(u, w, weight ?? null);
+    this.v.emit(["graph.addEdge", this.name, u, w, weight ?? null]);
+  }
+  removeEdge(u: Id, w: Id): void {
+    const k = this.needEdge(u, w);
+    this.edges.delete(k);
+    const drop = (a: Id, b: Id) => {
+      const l = this.adj.get(JSON.stringify(a))!;
+      const i = l.findIndex((x) => JSON.stringify(x) === JSON.stringify(b));
+      if (i >= 0) l.splice(i, 1);
+    };
+    drop(u, w);
+    if (!this.directed) drop(w, u);
+    this.v.emit(["graph.removeEdge", this.name, u, w]);
+  }
+  // visit reads the node u. It adds 1 to the counter visit.
+  visit(u: Id): void {
+    this.need(u);
+    this.v.count("visit");
+    this.v.emit(["graph.visit", this.name, u]);
+  }
+  // edge shows the edge u-w in a state, or reads it when the state is not given. A read adds 1 to the counter edge.
+  edge(u: Id, w: Id, state?: State): void {
+    this.needEdge(u, w);
+    if (state === undefined) this.v.count("edge");
+    this.v.emit(["graph.edge", this.name, u, w, state ?? null]);
+  }
+  // relax shows the relaxation of the edge u-w: the label of w changes from before to after when after is smaller. It adds 1 to the counter relax.
+  relax(u: Id, w: Id, before: number, after: number): boolean {
+    this.needEdge(u, w);
+    this.v.count("relax");
+    const better = after < before;
+    this.v.emit(["graph.relax", this.name, u, w, num(before), num(after), better]);
+    return better;
+  }
+  nodeLabel(u: Id, text: string | number | null): void {
+    this.need(u);
+    this.v.emit(["graph.nodeLabel", this.name, u, text === null ? null : typeof text === "number" ? num(text) : text]);
+  }
+  mark(u: Id, state: State): void { this.need(u); this.v.emit(["graph.mark", this.name, u, state]); }
+  unmark(u: Id): void { this.need(u); this.v.emit(["graph.unmark", this.name, u]); }
+  // path marks the nodes and the edges of a path as path.
+  path(nodes: Id[]): void {
+    nodes.forEach((u, i) => { this.need(u); if (i > 0) this.needEdge(nodes[i - 1], u); });
+    this.v.emit(["graph.path", this.name, nodes.slice()]);
+  }
+  // frontier shows the nodes that wait, such as the queue of a breadth-first search, in order. An empty list hides it.
+  frontier(nodes: Id[], label = "frontier"): void {
+    nodes.forEach((u) => this.need(u));
+    this.v.emit(["graph.frontier", this.name, nodes.slice(), label]);
+  }
+  label(text: string): void { this.v.emit(["graph.label", this.name, text]); }
+}
+
+// num keeps Infinity in the JSON of a trace, as the text "∞".
+function num(x: number): number | string {
+  return Number.isFinite(x) ? x : x > 0 ? "∞" : "-∞";
+}
+
+export interface TreeNode { id: Id; value?: Value; parent?: Id | null; side?: "left" | "right" }
+
+export interface TreeInit {
+  nodes?: TreeNode[];
+  // binary keeps a left and a right place for the children of each node, as in a search tree or a heap.
+  binary?: boolean;
+  label?: string;
+}
+
+// TreeView is a rooted tree, or a forest of rooted trees (spec 10.2.4). The player draws it with a tidy layout in a box that has the same size for each step.
+export class TreeView {
+  private parent = new Map<string, Id | null>();
+  private side = new Map<string, "left" | "right" | null>();
+  private ids = new Map<string, Id>();
+  constructor(private v: Viz, readonly name: string, readonly binary: boolean) {}
+  private need(u: Id): string {
+    const k = JSON.stringify(u);
+    if (!this.ids.has(k)) throw new Error(`the tree ${this.name} has no node ${k}`);
+    return k;
+  }
+  init(t: TreeInit): void {
+    for (const n of t.nodes ?? []) this.attach(n.parent ?? null, n.id, n.side ?? null, true);
+  }
+  // attach puts child under parent. A child that is in the tree already moves there with its subtree.
+  private attach(parent: Id | null, child: Id, side: "left" | "right" | null, fresh: boolean): void {
+    const ck = JSON.stringify(child);
+    if (fresh && this.ids.has(ck)) throw new Error(`the tree ${this.name} has the node ${ck} twice`);
+    if (parent !== null) {
+      this.need(parent);
+      for (let p: Id | null = parent; p !== null; p = this.parent.get(JSON.stringify(p)) ?? null) {
+        if (JSON.stringify(p) === ck) throw new Error(`the tree ${this.name}: ${ck} cannot go under its own subtree`);
+      }
+      if (this.binary) {
+        if (side === null) throw new Error(`the tree ${this.name} is binary, so insert needs the side left or right`);
+        for (const [k, p] of this.parent) {
+          if (k !== ck && p !== null && JSON.stringify(p) === JSON.stringify(parent) && this.side.get(k) === side) {
+            throw new Error(`the tree ${this.name}: the node ${JSON.stringify(parent)} has a ${side} child already`);
+          }
+        }
+      }
+    }
+    this.ids.set(ck, child);
+    this.parent.set(ck, parent);
+    this.side.set(ck, parent === null ? null : side);
+  }
+  has(u: Id): boolean { return this.ids.has(JSON.stringify(u)); }
+  parentOf(u: Id): Id | null { return this.parent.get(this.need(u)) ?? null; }
+  children(u: Id): Id[] {
+    const k = this.need(u), out: Id[] = [];
+    for (const [c, p] of this.parent) if (p !== null && JSON.stringify(p) === k) out.push(this.ids.get(c)!);
+    return out;
+  }
+  child(u: Id, side: "left" | "right"): Id | null {
+    const k = this.need(u);
+    for (const [c, p] of this.parent) if (p !== null && JSON.stringify(p) === k && this.side.get(c) === side) return this.ids.get(c)!;
+    return null;
+  }
+  // insert adds child under parent, or moves it there with its subtree when it is in the tree. A null parent makes the child a root.
+  insert(parent: Id | null, child: Id, side?: "left" | "right", value?: Value): void {
+    const fresh = !this.has(child);
+    this.attach(parent, child, side ?? null, false);
+    this.v.emit(["tree.insert", this.name, parent, child, side ?? null, fresh ? (value ?? null) : null, fresh]);
+  }
+  // remove takes out the node. Its children go to its parent, in its place.
+  remove(u: Id): void {
+    const k = this.need(u), p = this.parent.get(k) ?? null, s = this.side.get(k) ?? null;
+    const kids = this.children(u);
+    if (this.binary && kids.length > 1) throw new Error(`the tree ${this.name}: remove a node with two children after a replace`);
+    for (const c of kids) {
+      this.parent.set(JSON.stringify(c), p);
+      this.side.set(JSON.stringify(c), p === null ? null : s);
+    }
+    this.parent.delete(k); this.side.delete(k); this.ids.delete(k);
+    this.v.emit(["tree.remove", this.name, u]);
+  }
+  // rotate turns the edge between u and its child: "left" lifts the right child of u, and "right" lifts the left child.
+  rotate(u: Id, dir: "left" | "right"): void {
+    if (!this.binary) throw new Error(`the tree ${this.name} is not binary, so it cannot rotate`);
+    const up = dir === "left" ? "right" : "left";
+    const x = this.child(u, up);
+    if (x === null) throw new Error(`the tree ${this.name}: ${JSON.stringify(u)} has no ${up} child to rotate`);
+    const uk = JSON.stringify(u), xk = JSON.stringify(x);
+    const p = this.parent.get(uk) ?? null, ps = this.side.get(uk) ?? null;
+    const inner = this.child(x, dir);
+    this.parent.set(xk, p); this.side.set(xk, ps);
+    this.parent.set(uk, x); this.side.set(uk, dir);
+    if (inner !== null) { this.parent.set(JSON.stringify(inner), u); this.side.set(JSON.stringify(inner), up); }
+    this.v.count("rotate");
+    this.v.emit(["tree.rotate", this.name, u, dir]);
+  }
+  replace(u: Id, value: Value): void { this.need(u); this.v.emit(["tree.replace", this.name, u, value]); }
+  // visit reads the node u. It adds 1 to the counter visit.
+  visit(u: Id): void { this.need(u); this.v.count("visit"); this.v.emit(["tree.visit", this.name, u]); }
+  nodeLabel(u: Id, text: string | number | null): void { this.need(u); this.v.emit(["tree.nodeLabel", this.name, u, text]); }
+  mark(u: Id, state: State): void { this.need(u); this.v.emit(["tree.mark", this.name, u, state]); }
+  unmark(u: Id): void { this.need(u); this.v.emit(["tree.unmark", this.name, u]); }
+  // edge shows the edge from u to its parent in a state.
+  edge(u: Id, state: State | null): void {
+    if (this.parentOf(u) === null) throw new Error(`the tree ${this.name}: ${JSON.stringify(u)} is a root, so it has no edge`);
+    this.v.emit(["tree.edge", this.name, u, state]);
+  }
+  label(text: string): void { this.v.emit(["tree.label", this.name, text]); }
+}
+
 export class Viz {
   steps: Step[] = [];
   counters: Record<string, number> = {};
@@ -149,6 +376,20 @@ export class Viz {
   array(name: string, values: Value[], opts: { view?: "bars" | "cells"; label?: string } = {}): ArrayView {
     this.emit(["array.create", name, values.slice(), { view: opts.view ?? "bars", label: opts.label ?? null }]);
     return new ArrayView(this, name, values.slice());
+  }
+  graph(name: string, g: GraphInit): GraphView {
+    const view = new GraphView(this, name, !!g.directed);
+    view.init(g);
+    const nodes = g.nodes.map((n) => (typeof n === "object" ? { ...n } : { id: n }));
+    const layout = g.layout ?? (nodes.every((n) => n.x !== undefined && n.y !== undefined) ? "fixed" : "circle");
+    this.emit(["graph.create", name, { nodes, edges: (g.edges ?? []).map((e) => e.slice()), directed: !!g.directed, weighted: !!g.weighted, layout, label: g.label ?? null }]);
+    return view;
+  }
+  tree(name: string, t: TreeInit = {}): TreeView {
+    const view = new TreeView(this, name, !!t.binary);
+    view.init(t);
+    this.emit(["tree.create", name, { nodes: (t.nodes ?? []).map((n) => ({ ...n })), binary: !!t.binary, label: t.label ?? null }]);
+    return view;
   }
   destroy(name: string): void { this.emit(["destroy", name]); }
 }

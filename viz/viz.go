@@ -114,7 +114,7 @@ type Report struct {
 //go:embed check.js
 var checkJS string
 
-// Check runs the bundled scene in Node on each preset (rules V01, V02, V04, V05 and V10). ids are the line ids of the pseudocode of the page. Without Node, the check is skipped and says so.
+// Check runs the bundled scene in Node on each preset (rules V01, V02, V04, V05, V10, and the state vocabulary of V09). It also checks that each event names a view of its kind. ids are the line ids of the pseudocode of the page. Without Node, the check is skipped and says so.
 func Check(slug string, bundle []byte, presets []Preset, ids []string) Report {
 	r := Report{Slug: slug}
 	nodeBin, err := exec.LookPath("node")
@@ -153,11 +153,12 @@ func Check(slug string, bundle []byte, presets []Preset, ids []string) Report {
 	}
 	var res struct {
 		Presets []struct {
-			Name  string   `json:"name"`
-			Error string   `json:"error"`
-			Same  bool     `json:"same"`
-			Lines []string `json:"lines"`
-			Steps int      `json:"steps"`
+			Name    string   `json:"name"`
+			Error   string   `json:"error"`
+			Same    bool     `json:"same"`
+			Lines   []string `json:"lines"`
+			Steps   int      `json:"steps"`
+			Invalid []string `json:"invalid"`
 		} `json:"presets"`
 	}
 	if err := json.Unmarshal(out, &res); err != nil {
@@ -170,6 +171,9 @@ func Check(slug string, bundle []byte, presets []Preset, ids []string) Report {
 		if p.Error != "" {
 			r.Fails = append(r.Fails, fmt.Sprintf("preset %s: %s", p.Name, p.Error))
 			continue
+		}
+		for _, m := range p.Invalid {
+			r.Fails = append(r.Fails, fmt.Sprintf("preset %s: %s", p.Name, m))
 		}
 		if !p.Same {
 			r.Fails = append(r.Fails, fmt.Sprintf("preset %s: two runs gave different traces (V02)", p.Name))

@@ -1,7 +1,9 @@
 package viz
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -32,5 +34,77 @@ func TestOnlyViz(t *testing.T) {
 	_, err := Build("testdata/bad/scene.ts", false)
 	if err == nil || !strings.Contains(err.Error(), "V01") {
 		t.Fatalf("want a V01 error, got %v", err)
+	}
+}
+
+func TestGraphAndTree(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not installed")
+	}
+	for _, c := range []struct {
+		dir, slug string
+		presets   []Preset
+		ids       []string
+	}{
+		{"graph", "graph-demo", []Preset{
+			{"line", map[string]any{"n": 3, "edges": [][]int{{0, 1, 4}, {1, 2, 1}}}},
+			{"shortcut", map[string]any{"n": 4, "edges": [][]int{{0, 1, 1}, {0, 2, 5}, {1, 2, 2}, {2, 3, 1}, {1, 3, 7}}}},
+			{"apart", map[string]any{"n": 3, "edges": [][]int{{0, 1, 2}}}},
+		}, []string{"L1", "L2", "L3"}},
+		{"tree", "tree-demo", []Preset{
+			{"pairs", map[string]any{"n": 4, "unions": [][]int{{0, 1}, {2, 3}}}},
+			{"chain", map[string]any{"n": 5, "unions": [][]int{{0, 1}, {1, 2}, {3, 4}, {4, 0}, {2, 3}}}},
+			{"none", map[string]any{"n": 3, "unions": [][]int{}}},
+		}, []string{"L1", "L2"}},
+	} {
+		b, err := Build("testdata/"+c.dir+"/scene.ts", true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r := Check(c.slug, b, c.presets, c.ids); len(r.Fails) > 0 {
+			t.Errorf("%s: %v", c.dir, r.Fails)
+		}
+	}
+}
+
+func TestViewErrors(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not installed")
+	}
+	src := `import { scene } from "@algo/viz";
+export default scene({
+  slug: "bad-views",
+  input: { type: "x" },
+  run(v, input: { k: number }) {
+    const g = v.graph("G", { nodes: [1, 2], edges: [[1, 2]] });
+    const t = v.tree("T", { binary: true, nodes: [{ id: "r" }, { id: "a", parent: "r", side: "left" }] });
+    v.line("L1");
+    if (input.k === 1) g.edge(2, 3);
+    if (input.k === 2) t.insert("r", "b", "left");
+    if (input.k === 3) t.insert("a", "r", "left");
+    if (input.k === 4) g.mark(1, "glow" as any);
+    return 0;
+  },
+});
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "scene.ts")
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b, err := Build(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presets := []Preset{{"edge", map[string]int{"k": 1}}, {"side", map[string]int{"k": 2}}, {"cycle", map[string]int{"k": 3}}, {"state", map[string]int{"k": 4}}}
+	r := Check("bad-views", b, presets, []string{"L1"})
+	for _, want := range []string{"has no edge 2-3", "has a left child already", "cannot go under its own subtree", `the state "glow" is not in the vocabulary (V09)`} {
+		found := false
+		for _, f := range r.Fails {
+			found = found || strings.Contains(f, want)
+		}
+		if !found {
+			t.Errorf("no fail says %q: %v", want, r.Fails)
+		}
 	}
 }

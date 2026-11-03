@@ -351,6 +351,23 @@ mark { background: color-mix(in srgb, var(--st-compare) 35%, transparent); color
 .arr.cells .cell[data-st="rejected"] .blk { box-shadow: inset 0 0 0 2px var(--st-rejected); opacity: 0.5; }
 .arr.cells .cell[data-st="visited"] .blk { box-shadow: inset 0 0 0 3px var(--st-visited); }
 .arr.cells .cell[data-st="invariant"] .blk { background: var(--st-invariant); }
+/* The graph and tree views. A state sets --c on a node or an edge. The box scales with the width, and its text stays readable at 320 px. */
+.gv { display: flex; flex-direction: column; gap: 0.3rem; align-items: center; }
+.gv > .arr-label { align-self: flex-start; }
+.gv-svg { width: 100%; max-width: 32rem; height: auto; overflow: visible; }
+.gv-edge line, line.gv-edge { stroke: var(--c, var(--st-default)); stroke-width: 2; }
+.gv-edge[data-st] line, line.gv-edge[data-st] { stroke-width: 3.5; }
+.gv-edge[data-st="rejected"] line, line.gv-edge[data-st="rejected"] { stroke-dasharray: 4 3; stroke-width: 2; }
+.gv-head { fill: var(--st-default); }
+.gv-w { font: 600 11px var(--mono); fill: var(--soft); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.gv-node circle { fill: var(--bg); stroke: var(--c, var(--st-default)); stroke-width: 2; }
+.gv-node[data-st] circle { stroke-width: 3.5; fill: color-mix(in srgb, var(--c) 24%, var(--bg)); }
+.gv-node[data-st="rejected"] circle { stroke-dasharray: 3 2; }
+.gv-id { font: 650 12px var(--mono); fill: var(--text); text-anchor: middle; }
+.gv-tag { font: 700 11px var(--mono); fill: var(--st-active); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.gv-frontier { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; align-self: flex-start; min-height: 1.6rem; }
+.gv-chip { font: 600 0.8rem var(--mono); padding: 0.05rem 0.45rem; border-radius: 0.3rem; box-shadow: inset 0 0 0 2px var(--st-frontier); }
+.gv-empty { font-size: 0.8rem; color: var(--muted); }
 .legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 0.75rem; color: var(--muted); }
 .legend span::before { content: ""; display: inline-block; width: 0.7rem; height: 0.7rem; margin-right: 0.3rem; vertical-align: -0.05rem; background: var(--c); }
 .viz-page .player { min-height: 28rem; }
