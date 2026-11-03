@@ -158,6 +158,10 @@ func cmdCheck(args []string) error {
 	withViz := f.Bool("viz", false, "also build and check the scenes")
 	rules := f.Bool("rules", false, "print the rules and exit")
 	decls := f.String("decls", "build/lean/decls.jsonl", "the declarations that algo lean build wrote, for the L rules; a missing file skips them")
+	checkers := f.Bool("checkers", false, "run each custom checker on its checker_cases.jsonl (S03); the checker runs in the sandbox")
+	unsafe := f.Bool("unsafe-local", false, "with -checkers, run the checkers on this machine, not in the sandbox; CI sets CI=true instead")
+	sandbox := f.String("sandbox", "auto", "with -checkers, the container engine of the sandbox: docker, podman, or none")
+	images := f.String("images", "manifests/images.yaml", "with -checkers, the manifest of the runner images")
 	if err := parse(f, args); err != nil {
 		return err
 	}
@@ -181,6 +185,26 @@ func cmdCheck(args []string) error {
 		return err
 	}
 	opt := check.Options{Rule: *rule, Main: *main, Decls: ds}
+	if *checkers {
+		box, err := openSandbox(*sandbox, under(c.Root, *images), *unsafe)
+		if err != nil {
+			return err
+		}
+		if box == nil && !*unsafe && os.Getenv("CI") != "true" {
+			return usageError{"the checkers are code from the repository; use the sandbox or CI, or give -unsafe-local"}
+		}
+		opt.Checker = func(k *contract.Contract) (*contract.Custom, error) {
+			if box != nil {
+				if err := box.Ready("python"); err != nil {
+					return nil, fmt.Errorf("the checker runs in the Python image: %w", err)
+				}
+			}
+			return k.StartCustom(lang.CheckerWrap(box, k))
+		}
+		if box != nil {
+			defer box.Reap()
+		}
+	}
 	if f.NArg() > 0 || *changed != "" {
 		opt.Only = map[string]bool{}
 		for _, s := range f.Args() {

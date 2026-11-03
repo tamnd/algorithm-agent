@@ -163,6 +163,9 @@ func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases 
 		}
 	}()
 	fail := func(c contract.Case, reason string, got, want []byte) {
+		if c.Flaky {
+			reason += "; " + flakyNote(c)
+		}
 		f := status.CaseFailure{Case: c.ID(), Reason: reason}
 		if len(got) > 0 {
 			f.Got = contract.Short(compact(got))
@@ -222,9 +225,23 @@ func (r *Runner) Shared(n *node.Node, im node.Impl, k *contract.Contract, cases 
 			fail(c, reason, rep.Result, c.Expect)
 			continue
 		}
+		if c.Flaky {
+			// A flaky case counts as a failure, also when this run passes it (rule S09).
+			f := status.CaseFailure{Case: c.ID(), Reason: "the case passes in this run, but " + flakyNote(c)}
+			s.Failures = append(s.Failures, f)
+			continue
+		}
 		s.Passed++
 	}
 	return s
+}
+
+// flakyNote says that the case is flaky and names its issue.
+func flakyNote(c contract.Case) string {
+	if c.Issue == "" {
+		return "it is marked flaky, so it counts as a failure"
+	}
+	return "it is marked flaky (" + c.Issue + "), so it counts as a failure"
 }
 
 // compact removes the spaces of a JSON text, so that the outputs of all languages look the same in a report.
@@ -272,7 +289,12 @@ func (r *Runner) buildAdapter(gen generator, dir string, n *node.Node, im node.I
 
 // checkerArgv runs the custom checker of k in the Python image, with the problem directory mounted read-only. The checker is code from the content repository too.
 func (r *Runner) checkerArgv(k *contract.Contract) func([]string) []string {
-	if r.Box == nil {
+	return CheckerWrap(r.Box, k)
+}
+
+// CheckerWrap returns the wrap that runs the custom checker of the contract in the Python image of the sandbox, with the node directory as a read-only mount. A nil sandbox gives a nil wrap, so the checker runs on the host.
+func CheckerWrap(box *Sandbox, k *contract.Contract) func([]string) []string {
+	if box == nil {
 		return nil
 	}
 	return func(argv []string) []string {
@@ -280,7 +302,7 @@ func (r *Runner) checkerArgv(k *contract.Contract) func([]string) []string {
 		if err != nil {
 			dir = k.Dir
 		}
-		return r.Box.Argv("python", true, []Mount{{Dir: dir, ReadOnly: true}}, argv)
+		return box.Argv("python", true, []Mount{{Dir: dir, ReadOnly: true}}, argv)
 	}
 }
 

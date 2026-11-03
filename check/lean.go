@@ -39,7 +39,7 @@ func (r *run) leanNode(n *node.Node) {
 	fs := formal.CheckNode(n, r.opt.Decls)
 	fs = append(fs, formal.CheckClaims(n, r.opt.Decls)...)
 	for _, f := range fs {
-		r.add(f.Rule, Severity(formal.Severities[f.Rule]), p, 0, "%s: %s", strings.TrimPrefix(f.Where, n.Slug+" "), f.Msg)
+		r.add(f.Rule, Severity(f.Sev()), p, 0, "%s: %s", strings.TrimPrefix(f.Where, n.Slug+" "), f.Msg)
 	}
 }
 
@@ -54,6 +54,6 @@ func (r *run) leanDecls() {
 		if d.Pos != nil {
 			line = d.Pos.Line
 		}
-		r.add(f.Rule, Severity(formal.Severities[f.Rule]), leanFile(d.Module), line, "%s %s", f.Decl, f.Msg)
+		r.add(f.Rule, Severity(f.Sev()), leanFile(d.Module), line, "%s %s", f.Decl, f.Msg)
 	}
 }

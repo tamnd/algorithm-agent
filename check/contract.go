@@ -124,6 +124,11 @@ func (r *run) checkerCases(n *node.Node, k *contract.Contract) {
 		return
 	}
 	valid, invalid := 0, 0
+	type numbered struct {
+		c    checkerCase
+		line int
+	}
+	var good []numbered
 	sc := bufio.NewScanner(bytes.NewReader(b))
 	sc.Buffer(make([]byte, 64*1024), 64*1024*1024)
 	for line := 1; sc.Scan(); line++ {
@@ -145,15 +150,38 @@ func (r *run) checkerCases(n *node.Node, k *contract.Contract) {
 			r.add("S03", Block, p, line, "the checker case %s has no valid field", c.Name)
 		case *c.Valid:
 			valid++
+			good = append(good, numbered{c, line})
 		default:
 			invalid++
 			if c.Note == "" {
 				r.add("S03", Block, p, line, "the invalid output %s needs a note that says what is wrong with it", c.Name)
 			}
+			good = append(good, numbered{c, line})
 		}
 	}
 	if valid == 0 || invalid == 0 {
 		r.add("S03", Block, p, 0, "the checker cases need at least one valid and one invalid output; there are %d and %d", valid, invalid)
+	}
+	if r.opt.Checker == nil || len(good) == 0 || !r.wants("S03") {
+		return
+	}
+	ck, err := r.opt.Checker(k)
+	if err != nil {
+		r.add("S03", Block, p, 0, "%v", err)
+		return
+	}
+	defer ck.Close()
+	for _, x := range good {
+		reason, err := ck.Check(contract.Case{Name: x.c.Name, Args: x.c.Args}, x.c.Output, nil)
+		switch {
+		case err != nil:
+			r.add("S03", Block, p, x.line, "%v", err)
+			return
+		case *x.c.Valid && reason != "":
+			r.add("S03", Block, p, x.line, "the checker rejects the valid output %s: %s", x.c.Name, reason)
+		case !*x.c.Valid && reason == "":
+			r.add("S03", Block, p, x.line, "the checker accepts the invalid output %s (%s)", x.c.Name, x.c.Note)
+		}
 	}
 }
 

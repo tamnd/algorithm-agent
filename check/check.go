@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tamnd/algorithm-agent/contract"
 	"github.com/tamnd/algorithm-agent/formal"
 	"github.com/tamnd/algorithm-agent/node"
 	"github.com/tamnd/algorithm-agent/status"
@@ -81,6 +82,7 @@ var Rules = map[string]string{
 	"L05": "each time claim of a node with lean.cost has a class lemma of the same class",
 	"L07": "the model is total and computable",
 	"L09": "the module path mirrors the node path",
+	"L10": "each module builds in at most 60 seconds; algo lean build -time reports it, and a module above 300 seconds blocks",
 	"X01": "each link in a node to /<slug>/ names a node, an area or a site page",
 	"X06": "no node slug is a reserved word, a language id or an area id",
 }
@@ -95,6 +97,8 @@ type Options struct {
 	Main bool
 	// Decls are the declarations that algo lean build wrote. When it is nil, the rules L01 to L09 that need them do not run.
 	Decls formal.Decls
+	// Checker, when it is not nil, starts the custom checker of a contract. S03 then runs the checker on each line of checker_cases.jsonl. The caller decides where the checker runs, such as in the sandbox.
+	Checker func(k *contract.Contract) (*contract.Custom, error)
 }
 
 type run struct {
@@ -105,11 +109,14 @@ type run struct {
 }
 
 func (r *run) add(rule string, sev Severity, path string, line int, format string, args ...any) {
-	if r.opt.Rule != "" && r.opt.Rule != rule {
+	if !r.wants(rule) {
 		return
 	}
 	r.out = append(r.out, Finding{Rule: rule, Severity: sev, Path: path, Line: line, Msg: fmt.Sprintf(format, args...)})
 }
+
+// wants reports whether the run includes the rule.
+func (r *run) wants(rule string) bool { return r.opt.Rule == "" || r.opt.Rule == rule }
 
 func (r *run) want(n *node.Node) bool {
 	return len(r.opt.Only) == 0 || r.opt.Only[n.Slug]

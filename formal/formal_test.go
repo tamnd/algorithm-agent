@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamnd/algorithm-agent/node"
 )
@@ -132,5 +133,38 @@ func TestStatementAndModel(t *testing.T) {
 	}
 	if len(got) != 2 || !strings.Contains(got[0], "is of the kind opaque, want def") || !strings.Contains(got[1], "L07 m lean.model: Algo.S.M.run' is opaque") {
 		t.Errorf("CheckNode with an opaque model = %q", got)
+	}
+}
+
+func TestCheckTimes(t *testing.T) {
+	ts := []ModuleTime{
+		{Module: "Algo.A", File: "Algo/A.lean", Took: 5 * time.Second},
+		{Module: "Algo.B", File: "Algo/B.lean", Took: 90 * time.Second},
+		{Module: "Algo.C", File: "Algo/C.lean", Took: 400 * time.Second},
+	}
+	fs := CheckTimes(ts)
+	if len(fs) != 2 {
+		t.Fatalf("CheckTimes = %v", fs)
+	}
+	if fs[0].Where != "Algo/B.lean" || fs[0].Sev() != "warn" || !strings.Contains(fs[0].Msg, "takes 1m30s") {
+		t.Errorf("the slow module: %+v", fs[0])
+	}
+	if fs[1].Where != "Algo/C.lean" || fs[1].Sev() != "block" {
+		t.Errorf("the very slow module: %+v", fs[1])
+	}
+	if (Finding{Rule: "L03"}).Sev() != "block" {
+		t.Error("L03 is not a block rule")
+	}
+}
+
+func TestOwnTime(t *testing.T) {
+	log := "Algo/Cost.lean:1:0: elaboration took 105ms\ncumulative profiling times:\n\telaboration 63ms\n\timport 8.46s\n\tinitialization 277ms\n\tinterpretation 1.48s\n\ttype checking 1.04ms\n\tfix level params 0.5μs\n"
+	got, ok := ownTime(log)
+	want := 63*time.Millisecond + 1480*time.Millisecond + 1040*time.Microsecond + 500*time.Nanosecond
+	if !ok || got != want {
+		t.Errorf("ownTime = %v %v, want %v", got, ok, want)
+	}
+	if _, ok := ownTime("no profile"); ok {
+		t.Error("ownTime reads a log with no profile")
 	}
 }

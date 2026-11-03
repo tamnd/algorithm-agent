@@ -4,11 +4,13 @@ package check
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/tamnd/algorithm-agent/contract"
 	"github.com/tamnd/algorithm-agent/formal"
 	"github.com/tamnd/algorithm-agent/node"
 )
@@ -116,6 +118,40 @@ func TestS02AndS03Cases(t *testing.T) {
 	c = fixture(t, map[string]string{problemDir + "contract.yaml": strings.Replace(searchContract, "checker: custom", "checker: fuzzy", 1)})
 	if got := fired(Run(c, Options{}), "S01"); len(got) != 1 || !strings.Contains(got[0], `"fuzzy" is not a checker kind`) {
 		t.Errorf("S01 = %q", got)
+	}
+}
+
+func TestS03Run(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("no python3")
+	}
+	// The checker accepts an index of x, and rejects all else. The case "wrong" says that 1 is valid, but a[1] is not x.
+	checker := "def check(args, output, expected=None):\n" +
+		"    a, x = args['a'], args['x']\n" +
+		"    if isinstance(output, int) and not isinstance(output, bool) and 0 <= output < len(a) and a[output] == x:\n" +
+		"        return None\n" +
+		"    return 'not an index of x'\n"
+	c := fixture(t, map[string]string{
+		problemDir + "contract.yaml": searchContract,
+		problemDir + "checker.py":    checker,
+		problemDir + "checker_cases.jsonl": `{"name":"ok","args":{"a":[1,2],"x":1},"output":0,"valid":true}` + "\n" +
+			`{"name":"wrong","args":{"a":[1,2],"x":1},"output":1,"valid":true}` + "\n" +
+			`{"name":"past","args":{"a":[1,2],"x":1},"output":2,"valid":false,"note":"past the end"}` + "\n" +
+			`{"name":"lax","args":{"a":[1,2],"x":1},"output":0,"valid":false,"note":"the checker must reject it, but it is right"}` + "\n",
+	})
+	run := func(k *contract.Contract) (*contract.Custom, error) { return k.StartCustom(nil) }
+	got := fired(Run(c, Options{Rule: "S03", Checker: run}), "S03")
+	want := []string{"checker_cases.jsonl: block: the checker rejects the valid output wrong: not an index of x", "checker_cases.jsonl: block: the checker accepts the invalid output lax"}
+	if len(got) != len(want) {
+		t.Fatalf("S03 = %q", got)
+	}
+	for i, w := range want {
+		if !strings.Contains(got[i], w) {
+			t.Errorf("S03[%d] = %q, want %q", i, got[i], w)
+		}
+	}
+	if got := fired(Run(c, Options{Rule: "S03"}), "S03"); len(got) != 0 {
+		t.Errorf("without Checker, S03 = %q", got)
 	}
 }
 

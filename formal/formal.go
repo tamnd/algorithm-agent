@@ -166,12 +166,22 @@ type Finding struct {
 	// Node is the slug of the node of the finding, and Decl the declaration, when there is one.
 	Node string
 	Decl string
+	// Severity, when it is not empty, overrides the severity of the rule in Severities. L10 uses it, because a slow module is a warning and a very slow module blocks.
+	Severity string
 }
 
 // Severities are the severities of the L rules in 13.3: a block rule stops a merge, and a level rule keeps the node below the level that needs it.
-var Severities = map[string]string{"L01": "block", "L02": "level", "L03": "block", "L05": "level", "L07": "level", "L09": "block"}
+var Severities = map[string]string{"L01": "block", "L02": "level", "L03": "block", "L05": "level", "L07": "level", "L09": "block", "L10": "warn"}
 
 func (f Finding) String() string { return f.Rule + " " + f.Where + ": " + f.Msg }
+
+// Sev returns the severity of the finding: block, level or warn.
+func (f Finding) Sev() string {
+	if f.Severity != "" {
+		return f.Severity
+	}
+	return Severities[f.Rule]
+}
 
 // Kinds are the kinds that each key of a lean field must name.
 var Kinds = map[string][]string{

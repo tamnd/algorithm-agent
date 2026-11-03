@@ -32,6 +32,7 @@ func cmdLeanBuild(args []string) error {
 	sandbox := f.String("sandbox", "none", "run lake in a container of the Lean image: docker, podman or none")
 	images := f.String("images", "manifests/images.yaml", "the image manifest, for -sandbox")
 	verbose := f.Bool("v", false, "show the output of lake")
+	timed := f.Bool("time", false, "after the build, elaborate each module again and report a slow module (L10)")
 	if err := parse(f, args); err != nil {
 		return err
 	}
@@ -78,10 +79,27 @@ func cmdLeanBuild(args []string) error {
 		fmt.Printf("  %-24s %s  %s\n", n.Slug, l.Label, l.Name)
 	}
 	fs := formal.Check(c, ds)
+	if *timed {
+		ts, err := formal.Time(context.Background(), o)
+		if err != nil {
+			if !*verbose {
+				fmt.Fprint(os.Stderr, log.String())
+			}
+			return err
+		}
+		for _, t := range ts {
+			fmt.Printf("  %-40s %6.1f s (%.1f s with the imports)\n", t.Module, t.Took.Seconds(), t.Wall.Seconds())
+		}
+		fs = append(fs, formal.CheckTimes(ts)...)
+	}
+	blocks := 0
 	for _, x := range fs {
 		fmt.Println(x)
+		if x.Sev() != "warn" {
+			blocks++
+		}
 	}
-	if len(fs) > 0 {
+	if blocks > 0 {
 		return errFindings
 	}
 	fmt.Printf("Each declaration uses only the axioms %s.\n", strings.Join(formal.Allowed, ", "))

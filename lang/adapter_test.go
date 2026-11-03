@@ -98,6 +98,14 @@ func TestSharedPython(t *testing.T) {
 	if len(s.Failures) != 1 || !strings.Contains(s.Failures[0].Reason, "IndexError: boom") {
 		t.Fatalf("an exception: %+v", s)
 	}
+
+	// A flaky case counts as a failure, also when it passes (S09).
+	flaky := append([]contract.Case(nil), cases...)
+	flaky[1].Flaky, flaky[1].Issue = true, "#7"
+	s = r.Shared(n, pyImpl(goodSort), k, flaky)
+	if s.OK() || s.Passed != 3 || len(s.Failures) != 1 || s.Failures[0].Case != "basic/duplicates" || !strings.Contains(s.Failures[0].Reason, "marked flaky (#7)") {
+		t.Fatalf("a flaky case: %+v", s)
+	}
 }
 
 func TestSharedNoBuild(t *testing.T) {
