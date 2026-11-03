@@ -133,7 +133,7 @@ algorithm-agent/
 | `algo check [-changed]` | schema, audit of the changed nodes, Lean of the changed modules, tests of the changed implementations, scene checks | 03.5 F2 |
 | `algo audit [-changed] [-rule ID]` | the audit rules | 13.3 |
 | `algo mint` | give tags to provisional ids before the merge | 04.2 |
-| `algo mv <slug> <area>` | move a node to another area | 04.3 |
+| `algo mv <slug> <new-slug \| area>` | rename a node or move it to another area; the old slug goes to `aliases.reg` | 04.2, 04.3 |
 | `algo gen [lang]` | make the build trees under `build/lang/` | 08.5 |
 | `algo test [slug] [-lang L] [-kind cases\|diff\|prop\|mutation]` | run tests in the runner images | 09 |
 | `algo bench [slug] [-lang L]` | run the complexity checks | 09.7 |

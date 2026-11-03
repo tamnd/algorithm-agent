@@ -594,6 +594,23 @@ func (b *builder) redirects() string {
 	for _, n := range b.c.Nodes {
 		seen[n.Slug] = true
 	}
+	// The old slugs of registers/aliases.reg come first: an old URL keeps its target (spec 14.2).
+	olds := make([]string, 0, len(b.c.OldSlugs))
+	for o := range b.c.OldSlugs {
+		olds = append(olds, o)
+	}
+	sort.Strings(olds)
+	for _, o := range olds {
+		if to := b.c.OldSlugs[o]; !seen[o] && b.c.BySlug[to] != nil {
+			seen[o] = true
+			// The splat keeps the pages under the node, such as /old/python/ and /old/proof/.
+			fmt.Fprintf(&s, "/%s /%s/ 301\n", o, to)
+			fmt.Fprintf(&s, "/%s/* /%s/:splat 301\n", o, to)
+			fmt.Fprintf(&s, "/%s.json /%s.json 301\n", o, to)
+			fmt.Fprintf(&s, "/%s.md /%s.md 301\n", o, to)
+			fmt.Fprintf(&s, "/embed/%s/ /embed/%s/ 301\n", o, to)
+		}
+	}
 	for _, n := range b.c.Nodes {
 		for _, a := range n.Aliases {
 			s2 := slugify(a)

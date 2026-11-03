@@ -45,7 +45,7 @@ func (f Finding) String() string {
 var Rules = map[string]string{
 	"T01": "node.md front matter is valid for its kind",
 	"T02": "each tag is in registers/tags.reg, once, with its slug",
-	"T03": "each slug is unique, lowercase kebab-case and at most 60 characters",
+	"T03": "each slug is unique, lowercase kebab-case, at most 60 characters, and not an old slug in aliases.reg",
 	"T04": "the path of the node matches its area",
 	"T05": "no status, level or badge is written in front matter",
 	"T06": "no provisional id is left on main",
@@ -101,6 +101,7 @@ func Run(c *node.Corpus, opt Options) []Finding {
 		r.add("T01", Block, rel(c.Root, err.Error()), 0, "%v", err)
 	}
 	r.tags()
+	r.oldSlugs()
 	slugs := map[string][]*node.Node{}
 	for _, n := range c.Nodes {
 		slugs[n.Slug] = append(slugs[n.Slug], n)
@@ -112,6 +113,9 @@ func Run(c *node.Corpus, opt Options) []Finding {
 		r.front(n)
 		if len(slugs[n.Slug]) > 1 {
 			r.add("T03", Block, n.Rel+"/node.md", 0, "the slug %q is used by %d nodes", n.Slug, len(slugs[n.Slug]))
+		}
+		if to, ok := c.OldSlugs[n.Slug]; ok {
+			r.add("T03", Block, n.Rel+"/node.md", 0, "the slug %q is an old slug in registers/aliases.reg that moved to %q; an old URL never changes its target", n.Slug, to)
 		}
 		r.edges(n)
 		r.complexity(n)
@@ -255,6 +259,10 @@ func (r *run) target(n *node.Node, field, slug string, kinds ...string) {
 	}
 	t, ok := r.c.BySlug[slug]
 	if !ok {
+		if to, moved := r.c.OldSlugs[slug]; moved {
+			r.add("G05", Block, p, 0, "%s: the slug %q moved to %q", field, slug, to)
+			return
+		}
 		r.add("G05", Block, p, 0, "%s: no node has the slug %q", field, slug)
 		return
 	}
@@ -571,4 +579,18 @@ func (r *run) known(x string) bool {
 		}
 	}
 	return false
+}
+
+// oldSlugs checks that each line of registers/aliases.reg points to a node, so no redirect goes to a missing page.
+func (r *run) oldSlugs() {
+	olds := make([]string, 0, len(r.c.OldSlugs))
+	for o := range r.c.OldSlugs {
+		olds = append(olds, o)
+	}
+	sort.Strings(olds)
+	for _, o := range olds {
+		if to := r.c.OldSlugs[o]; r.c.BySlug[to] == nil {
+			r.add("T03", Block, "registers/aliases.reg", 0, "the old slug %q points to %q, but no node has that slug", o, to)
+		}
+	}
 }

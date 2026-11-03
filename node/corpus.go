@@ -75,6 +75,8 @@ type Corpus struct {
 	LangByID map[string]*Lang
 	Reserved map[string]bool
 	Tags     []Tag
+	// OldSlugs maps each old slug of registers/aliases.reg to the slug it moved to.
+	OldSlugs map[string]string
 	// Errors are the node directories that could not be read. Package check reports them as T01.
 	Errors []error
 }
@@ -120,6 +122,9 @@ func Load(root string) (*Corpus, error) {
 		return nil, err
 	}
 	c.Tags = tags
+	if c.OldSlugs, err = ReadAliases(filepath.Join(root, "registers", "aliases.reg")); err != nil {
+		return nil, err
+	}
 
 	nodes := filepath.Join(root, "nodes")
 	err = filepath.WalkDir(nodes, func(p string, d os.DirEntry, err error) error {
@@ -218,6 +223,34 @@ func readYAML(path string, v any) error {
 }
 
 // readTags reads registers/tags.reg. Each line is "TAG slug". A line that starts with # is a comment.
+// ReadAliases reads registers/aliases.reg. Each line is an old slug and the slug it moved to.
+func ReadAliases(path string) (map[string]string, error) {
+	out := map[string]string{}
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return out, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	line := 0
+	for s.Scan() {
+		line++
+		t := strings.TrimSpace(s.Text())
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		fs := strings.Fields(t)
+		if len(fs) != 2 {
+			return nil, fmt.Errorf("%s:%d: a line needs an old slug and a new slug", path, line)
+		}
+		out[fs[0]] = fs[1]
+	}
+	return out, s.Err()
+}
+
 func readTags(path string) ([]Tag, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
