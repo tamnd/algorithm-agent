@@ -20,11 +20,11 @@ func TestBuildAndCheck(t *testing.T) {
 		t.Skip("node is not installed")
 	}
 	presets := []Preset{{"empty", []int{}}, {"one", []int{5}}, {"three", []int{3, 1, 2}}}
-	r := Check("demo", b, presets, []string{"L1", "L2"})
+	r := Check(Scene{Slug: "demo", Bundle: b, Presets: presets, IDs: []string{"L1", "L2"}})
 	if len(r.Fails) > 0 {
 		t.Fatalf("fails: %v", r.Fails)
 	}
-	r = Check("demo", b, presets[:1], []string{"L1", "L2", "L3"})
+	r = Check(Scene{Slug: "demo", Bundle: b, Presets: presets[:1], IDs: []string{"L1", "L2", "L3"}})
 	if len(r.Fails) != 2 {
 		t.Fatalf("want 2 fails (V10, and V05 for L2 and L3), got %v", r.Fails)
 	}
@@ -76,7 +76,7 @@ func TestViews(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if r := Check(c.slug, b, c.presets, c.ids); len(r.Fails) > 0 {
+		if r := Check(Scene{Slug: c.slug, Bundle: b, Presets: c.presets, IDs: c.ids}); len(r.Fails) > 0 {
 			t.Errorf("%s: %v", c.dir, r.Fails)
 		}
 	}
@@ -119,7 +119,7 @@ export default scene({
 		t.Fatal(err)
 	}
 	presets := []Preset{{"edge", map[string]int{"k": 1}}, {"side", map[string]int{"k": 2}}, {"cycle", map[string]int{"k": 3}}, {"state", map[string]int{"k": 4}}, {"cell", map[string]int{"k": 5}}, {"heap", map[string]int{"k": 6}}, {"window", map[string]int{"k": 7}}, {"tstate", map[string]int{"k": 8}}}
-	r := Check("bad-views", b, presets, []string{"L1"})
+	r := Check(Scene{Slug: "bad-views", Bundle: b, Presets: presets, IDs: []string{"L1"}})
 	for _, want := range []string{"has no edge 2-3", "has a left child already", "cannot go under its own subtree", `the state "glow" is not in the vocabulary (V09)`, "has no cell [2, 0]", "the heap H has no cell 2", "has no window 2..3", `the state "warm" is not in the vocabulary (V09)`} {
 		found := false
 		for _, f := range r.Fails {

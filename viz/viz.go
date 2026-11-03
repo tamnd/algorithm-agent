@@ -96,6 +96,14 @@ func onlyViz(scene string) api.Plugin {
 	}
 }
 
+// Reference gives the Scene fields of the TypeScript reference src, the file path, for V06. An empty src gives no reference.
+func Reference(src, path string) ([]byte, error) {
+	if src == "" {
+		return nil, nil
+	}
+	return Probe([]byte(src), path)
+}
+
 // Preset is a named input of a scene.
 type Preset struct {
 	Name  string `json:"name"`
@@ -114,9 +122,24 @@ type Report struct {
 //go:embed check.js
 var checkJS string
 
-// Check runs the bundled scene in Node on each preset (rules V01, V02, V04, V05, V10, and the state vocabulary of V09). It also checks that each event names a view of its kind. ids are the line ids of the pseudocode of the page. Without Node, the check is skipped and says so.
-func Check(slug string, bundle []byte, presets []Preset, ids []string) Report {
+// Scene is what Check needs to check one scene.
+type Scene struct {
+	Slug    string
+	Bundle  []byte   // the output of Build
+	Presets []Preset // the presets of viz/presets.yaml
+	IDs     []string // the line ids of the main pseudocode block of the page
+	// Ref is the TypeScript reference after Probe, or nil when the node has none. RefErr is the error of Probe, which V06 reports.
+	Ref    []byte
+	RefErr error
+}
+
+// Check runs the bundled scene in Node on each preset (rules V01, V02, V04, V05, V06, V10, and the state vocabulary of V09). It also checks that each event names a view of its kind. When the scene has a reference, it runs the reference on each preset and compares the lines (V06). Without Node, the check is skipped and says so.
+func Check(sc Scene) Report {
+	slug, bundle, presets, ids := sc.Slug, sc.Bundle, sc.Presets, sc.IDs
 	r := Report{Slug: slug}
+	if sc.RefErr != nil {
+		r.Fails = append(r.Fails, "the TypeScript reference does not compile with probes: "+sc.RefErr.Error()+" (V06)")
+	}
 	nodeBin, err := exec.LookPath("node")
 	if err != nil {
 		r.Skipped = "node is not installed"
@@ -133,6 +156,9 @@ func Check(slug string, bundle []byte, presets []Preset, ids []string) Report {
 	defer os.RemoveAll(dir)
 	pj, _ := json.Marshal(presets)
 	files := map[string][]byte{"scene.js": bundle, "check.js": []byte(checkJS), "presets.json": pj}
+	if sc.Ref != nil {
+		files["ref.js"] = sc.Ref
+	}
 	for name, b := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), b, 0o600); err != nil {
 			r.Fails = append(r.Fails, err.Error())

@@ -38,13 +38,63 @@ function validate(t) {
   });
   return bad.slice(0, 5);
 }
+// The TypeScript reference with its markers turned into probes (rule V06), when the node has one.
+let ref = null, refError = "";
+if (fs.existsSync("ref.js")) {
+  try {
+    const mod = { exports: {} };
+    new Function("module", "exports", "require", fs.readFileSync("ref.js", "utf8"))(mod, mod.exports, () => { throw new Error("the reference imports a module"); });
+    const fns = Object.values(mod.exports).filter((f) => typeof f === "function");
+    if (fns.length !== 1) throw new Error(`the reference exports ${fns.length} functions, and V06 needs exactly one`);
+    ref = fns[0];
+  } catch (e) {
+    refError = String(e && e.message ? e.message : e);
+  }
+}
+let probes = [];
+globalThis.__probe = (id) => {
+  if (probes.length >= 1000000) throw new Error("the reference runs more than 1000000 marked lines");
+  probes.push(id);
+  return true;
+};
+// merged removes the repeats of the same id next to each other.
+const merged = (ids) => ids.filter((id, i) => i === 0 || id !== ids[i - 1]);
+// argsOf maps the input of a preset to the parameters of the reference, by name. A reference with one parameter that is not a key of the input gets the whole input.
+function argsOf(fn, input) {
+  const m = /^[^(]*\(([^)]*)\)/.exec(fn.toString());
+  const names = m ? m[1].split(",").map((s) => s.trim().split(/[\s=]/)[0]).filter(Boolean) : [];
+  if (input !== null && typeof input === "object" && !Array.isArray(input) && names.every((n) => n in input)) return names.map((n) => input[n]);
+  if (names.length === 1) return [input];
+  throw new Error(`the input has no key for each parameter of the reference (${names.join(", ")})`);
+}
+// lineTrace runs the reference on the input and compares its marked lines with the lines of the scene (V06). It gives a message, or "" when the two agree.
+function lineTrace(t, input) {
+  if (refError) return refError;
+  probes = [];
+  ref(...argsOf(ref, JSON.parse(JSON.stringify(input))));
+  const a = merged(t.steps.map((s) => s.line)), b = merged(probes);
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (i === a.length && i === b.length) return "";
+  const show = (xs) => {
+    const w = xs.slice(Math.max(0, i - 3), i + 3);
+    if (i >= xs.length) w.push("(end)");
+    return (i > 3 ? "... " : "") + w.join(" ") + (i + 3 < xs.length ? " ..." : "");
+  };
+  return `the lines differ from the TypeScript reference at line ${i + 1} of ${Math.max(a.length, b.length)}: the scene runs ${show(a)}, the reference runs ${show(b)} (V06)`;
+}
 const out = [];
 for (const p of presets) {
   try {
     const a = JSON.stringify(globalThis.AlgoViz.trace(scene, p.input));
     const b = JSON.stringify(globalThis.AlgoViz.trace(scene, p.input));
     const t = JSON.parse(a);
-    out.push({ name: p.name, same: a === b, steps: t.steps.length, lines: [...new Set(t.steps.map((s) => s.line))], invalid: validate(t) });
+    const invalid = validate(t);
+    if (ref || refError) {
+      const msg = lineTrace(t, p.input);
+      if (msg) invalid.push(msg);
+    }
+    out.push({ name: p.name, same: a === b, steps: t.steps.length, lines: [...new Set(t.steps.map((s) => s.line))], invalid });
   } catch (e) {
     out.push({ name: p.name, error: String(e && e.message ? e.message : e) });
   }

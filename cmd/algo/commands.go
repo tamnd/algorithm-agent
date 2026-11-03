@@ -318,7 +318,17 @@ func checkScene(c *node.Corpus, n *node.Node) viz.Report {
 		presets = append(presets, viz.Preset{Name: p.Name, Input: p.Input})
 	}
 	ids, _ := check.PseudoIDs(n.Body)
-	return viz.Check(n.Slug, js, presets, ids["main"])
+	ref, refErr := sceneRef(n)
+	return viz.Check(viz.Scene{Slug: n.Slug, Bundle: js, Presets: presets, IDs: ids["main"], Ref: ref, RefErr: refErr})
+}
+
+// sceneRef gives the TypeScript reference of the node with its markers turned into probes, for V06, or nil when the node has none.
+func sceneRef(n *node.Node) ([]byte, error) {
+	im := n.Lang("typescript")
+	if im == nil || im.Main() == nil {
+		return nil, nil
+	}
+	return viz.Reference(im.Main().Content, im.Main().Path)
 }
 
 // cmdStatus prints the ladders of one node.

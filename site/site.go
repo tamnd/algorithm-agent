@@ -505,7 +505,12 @@ func (b *builder) buildScenes() error {
 			presets = append(presets, viz.Preset{Name: p.Name, Input: p.Input})
 		}
 		ids, _ := check.PseudoIDs(n.Body)
-		r := viz.Check(n.Slug, js, presets, ids["main"])
+		var ref []byte
+		var refErr error
+		if im := n.Lang("typescript"); im != nil && im.Main() != nil {
+			ref, refErr = viz.Reference(im.Main().Content, im.Main().Path)
+		}
+		r := viz.Check(viz.Scene{Slug: n.Slug, Bundle: js, Presets: presets, IDs: ids["main"], Ref: ref, RefErr: refErr})
 		for _, f := range r.Fails {
 			b.opt.Log("%s: %s", n.Scene, f)
 		}
