@@ -36,7 +36,6 @@ type command struct {
 
 // planned are the commands of spec 18.3 that are not built yet, with the milestone that builds them.
 var planned = map[string]string{
-	"fmt":        "M0",
 	"audit":      "M0",
 	"mv":         "M0",
 	"gen":        "M0",
@@ -63,6 +62,7 @@ var commands []command
 func init() {
 	commands = []command{
 		{"new", "make a node directory with a provisional id and the sections of its kind", cmdNew},
+		{"fmt", "put node files, registers and topics in canonical form", cmdFmt},
 		{"mint", "give each provisional id a permanent tag", cmdMint},
 		{"check", "run the audit rules, and the scene checks with -viz", cmdCheck},
 		{"status", "show the ladders of a node and what the next level needs", cmdStatus},

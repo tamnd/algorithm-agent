@@ -87,3 +87,27 @@ func TestMintSkipsUsedTags(t *testing.T) {
 		t.Fatalf("got %d different tags, want 200", len(used))
 	}
 }
+
+func TestFmt(t *testing.T) {
+	root := copyCorpus(t)
+	p := filepath.Join(root, "nodes/searching/sequential-and-binary-search/binary-search/node.md")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, append(bytes.ReplaceAll(b, []byte("\n## "), []byte("  \n\n\n## ")), '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := run([]string{"fmt", "-check", "-root", root}); got != 1 {
+		t.Fatalf("algo fmt -check on a changed file exits with %d, want 1", got)
+	}
+	if got := run([]string{"fmt", "-root", root}); got != 0 {
+		t.Fatalf("algo fmt exits with %d", got)
+	}
+	if after, _ := os.ReadFile(p); !bytes.Equal(after, b) {
+		t.Fatalf("algo fmt does not give back the canonical file")
+	}
+	if got := run([]string{"fmt", "-check", "-root", root}); got != 0 {
+		t.Fatalf("algo fmt -check after algo fmt exits with %d", got)
+	}
+}

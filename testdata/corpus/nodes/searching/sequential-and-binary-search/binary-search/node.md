@@ -9,7 +9,6 @@ level: intro
 summary: Find a key in a sorted array. Compare the key with the middle item, and keep only the half that can hold the key.
 solves: [search-in-sorted-array]
 model: comparison-model
-prereqs: [loop-invariant, asymptotic-notation]
 complexity:
   vars: {n: the number of items in the array}
   time: {worst: Θ(log n), average: Θ(log n), best: Θ(1)}
@@ -19,6 +18,8 @@ history:
   year: 1946
   people: [John Mauchly, Derrick Henry Lehmer]
   note: Mauchly described the method in the Moore School Lectures in 1946. Lehmer gave a version for any n in 1960.
+prereqs: [loop-invariant, asymptotic-notation]
+see_also: [loop-invariant]
 sources:
   - book: isbn:9780201896855
     title: Donald E. Knuth, The Art of Computer Programming, Volume 3, second edition
@@ -29,7 +30,6 @@ sources:
   - url: https://research.google/blog/extra-extra-read-all-about-it-nearly-all-binary-searches-and-mergesorts-are-broken/
     title: Joshua Bloch, Nearly all binary searches and mergesorts are broken (2006)
     note: the overflow of (lo + hi) / 2
-see_also: [loop-invariant]
 ---
 
 ## In plain words
