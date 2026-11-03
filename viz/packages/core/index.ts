@@ -66,7 +66,7 @@ function hashString(s: string): number {
 export type Range = number | [number, number];
 
 export class ArrayView {
-  constructor(private v: Viz, readonly name: string, private data: Value[]) {}
+  constructor(protected v: Viz, readonly name: string, protected data: Value[]) {}
   get length(): number { return this.data.length; }
   get(i: number): Value {
     this.v.emit(["array.get", this.name, i]);
@@ -106,6 +106,122 @@ export class ArrayView {
     this.v.emit(["array.bracket", this.name, lo, mid ?? null, hi ?? null]);
   }
   label(text: string): void { this.v.emit(["array.label", this.name, text]); }
+  values(): Value[] { return this.data.slice(); }
+}
+
+// StringView is a string as a row of cells (spec 10.2.4). All the strings of a scene use one column grid, so a pattern that is shifted under a text stays aligned with it.
+export class StringView extends ArrayView {
+  private offset = 0;
+  // text gives the string.
+  text(): string { return this.data.join(""); }
+  // window shows the cells from lo to hi as the window that a pattern covers. hi can be past the end, when the pattern sticks out. Give null to hide it.
+  window(lo: number | null, hi?: number): void {
+    if (lo !== null && (!Number.isInteger(lo) || lo < 0 || lo >= this.data.length || (hi ?? lo) < lo)) throw new Error(`the string ${this.name} has no window ${lo}..${hi}`);
+    this.v.emit(["array.window", this.name, lo, lo === null ? null : (hi ?? lo)]);
+  }
+  // shift draws the string k columns to the right, for a pattern under a text.
+  shift(k: number): void {
+    if (!Number.isInteger(k) || k < 0) throw new Error(`the string ${this.name} cannot shift by ${k}`);
+    this.offset = k;
+    this.v.emit(["array.shift", this.name, k]);
+  }
+  get shifted(): number { return this.offset; }
+  // match compares the character i of this string with the character j of other. It counts one compare.
+  match(i: number, other: StringView, j: number): boolean {
+    if (i < 0 || i >= this.data.length || j < 0 || j >= other.data.length) throw new Error(`the match ${this.name}[${i}] = ${other.name}[${j}] is out of range`);
+    const eq = this.data[i] === other.data[j];
+    this.v.count("compare");
+    this.v.emit(["array.match", this.name, i, other.name, j, eq]);
+    return eq;
+  }
+}
+
+export type Cell = [number, number];
+
+export interface TableInit {
+  rowHeads?: Value[];
+  colHeads?: Value[];
+  values?: Value[][];
+  label?: string;
+}
+
+// TableView is a matrix with row and column headers (spec 10.2.4), for dynamic programming. fill records the cells that a value comes from, and the player draws an arrow to the first of them.
+export class TableView {
+  private cells: Value[][];
+  constructor(private v: Viz, readonly name: string, readonly rows: number, readonly cols: number, init?: Value[][]) {
+    this.cells = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => init?.[r]?.[c] ?? null));
+  }
+  private need(r: number, c: number): void {
+    if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || c < 0 || r >= this.rows || c >= this.cols) throw new Error(`the table ${this.name} has no cell [${r}, ${c}]`);
+  }
+  get(r: number, c: number): Value {
+    this.need(r, c);
+    this.v.emit(["table.get", this.name, r, c]);
+    return this.cells[r][c];
+  }
+  peek(r: number, c: number): Value { this.need(r, c); return this.cells[r][c]; }
+  fill(r: number, c: number, value: Value, opts?: { from?: Cell[] }): void {
+    this.need(r, c);
+    for (const [fr, fc] of opts?.from ?? []) this.need(fr, fc);
+    this.cells[r][c] = value;
+    this.v.count("write");
+    this.v.emit(["table.fill", this.name, r, c, value, (opts?.from ?? []).map((x) => [x[0], x[1]])]);
+  }
+  mark(cell: Cell, state: State): void { this.need(cell[0], cell[1]); this.v.emit(["table.mark", this.name, [cell[0], cell[1]], state]); }
+  unmark(cell: Cell): void { this.need(cell[0], cell[1]); this.v.emit(["table.unmark", this.name, [cell[0], cell[1]]]); }
+  label(text: string): void { this.v.emit(["table.label", this.name, text]); }
+}
+
+// HeapView is a binary heap that the player draws as an array and as a tree at the same time (spec 10.2.4). The children of the cell i are the cells 2i+1 and 2i+2, and a mark on a cell is also a mark on its node.
+export class HeapView {
+  private data: Value[];
+  constructor(private v: Viz, readonly name: string, values: Value[]) { this.data = values.slice(); }
+  get length(): number { return this.data.length; }
+  private need(i: number): void {
+    if (!Number.isInteger(i) || i < 0 || i >= this.data.length) throw new Error(`the heap ${this.name} has no cell ${i}`);
+  }
+  parent(i: number): number { return (i - 1) >> 1; }
+  left(i: number): number { return 2 * i + 1; }
+  right(i: number): number { return 2 * i + 2; }
+  get(i: number): Value { this.need(i); this.v.emit(["heap.get", this.name, i]); return this.data[i]; }
+  peek(i: number): Value { this.need(i); return this.data[i]; }
+  set(i: number, value: Value): void {
+    this.need(i);
+    this.data[i] = value;
+    this.v.count("write");
+    this.v.emit(["heap.set", this.name, i, value, null]);
+  }
+  swap(i: number, j: number): void {
+    this.need(i); this.need(j);
+    const t = this.data[i];
+    this.data[i] = this.data[j];
+    this.data[j] = t;
+    this.v.count("swap");
+    this.v.emit(["heap.swap", this.name, i, j]);
+  }
+  compare(i: number, j: number): number {
+    this.need(i); this.need(j);
+    this.v.count("compare");
+    this.v.emit(["heap.compare", this.name, i, j]);
+    const a = this.data[i] as number, b = this.data[j] as number;
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
+  // push adds a value at the end, as a new leaf.
+  push(value: Value): number {
+    this.data.push(value);
+    this.v.emit(["heap.push", this.name, value]);
+    return this.data.length - 1;
+  }
+  // pop removes the last cell and gives its value.
+  pop(): Value {
+    if (!this.data.length) throw new Error(`the heap ${this.name} is empty`);
+    this.v.emit(["heap.pop", this.name]);
+    return this.data.pop() as Value;
+  }
+  mark(range: Range, state: State): void { this.v.emit(["heap.mark", this.name, range, state]); }
+  unmark(range: Range): void { this.v.emit(["heap.unmark", this.name, range]); }
+  ptr(name: string, i: number | null): void { this.v.emit(["heap.ptr", this.name, name, i]); }
+  label(text: string): void { this.v.emit(["heap.label", this.name, text]); }
   values(): Value[] { return this.data.slice(); }
 }
 
@@ -390,6 +506,24 @@ export class Viz {
     view.init(t);
     this.emit(["tree.create", name, { nodes: (t.nodes ?? []).map((n) => ({ ...n })), binary: !!t.binary, label: t.label ?? null }]);
     return view;
+  }
+  string(name: string, text: string, opts: { label?: string } = {}): StringView {
+    const chars = [...text];
+    this.emit(["array.create", name, chars, { view: "str", label: opts.label ?? null }]);
+    return new StringView(this, name, chars);
+  }
+  table(name: string, rows: number, cols: number, t: TableInit = {}): TableView {
+    if (!Number.isInteger(rows) || !Number.isInteger(cols) || rows < 1 || cols < 1) throw new Error(`the table ${name} must have at least one row and one column`);
+    if (t.rowHeads && t.rowHeads.length !== rows) throw new Error(`the table ${name} has ${rows} rows but ${t.rowHeads.length} row heads`);
+    if (t.colHeads && t.colHeads.length !== cols) throw new Error(`the table ${name} has ${cols} columns but ${t.colHeads.length} column heads`);
+    const view = new TableView(this, name, rows, cols, t.values);
+    const values = Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, c) => view.peek(r, c)));
+    this.emit(["table.create", name, { rows, cols, rowHeads: t.rowHeads ?? null, colHeads: t.colHeads ?? null, values, label: t.label ?? null }]);
+    return view;
+  }
+  heap(name: string, values: Value[], opts: { label?: string } = {}): HeapView {
+    this.emit(["heap.create", name, values.slice(), { view: "heap", label: opts.label ?? null }]);
+    return new HeapView(this, name, values);
   }
   destroy(name: string): void { this.emit(["destroy", name]); }
 }

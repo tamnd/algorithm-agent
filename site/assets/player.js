@@ -23,7 +23,7 @@
 
   // frames turns a trace into one state for each step.
   function frames(trace) {
-    var st = { arrays: {}, graphs: {}, trees: {}, order: [], vars: {}, counters: {}, seen: {} };
+    var st = { arrays: {}, graphs: {}, trees: {}, tables: {}, order: [], vars: {}, counters: {}, seen: {} };
     Object.keys(trace.counters || {}).forEach(function (k) { st.counters[k] = 0; });
     var all = {}, out = [];
     trace.steps.forEach(function (step) {
@@ -31,13 +31,16 @@
       step.ev.forEach(function (e) {
         var a = st.arrays[e[1]];
         if (/^(graph|tree)\./.test(e[0])) { structEvent(st, e, hot2, all); return; }
-        switch (e[0]) {
+        if (/^table\./.test(e[0])) { tableEvent(st, e, hot2); return; }
+        // A heap keeps the state of an array. The player draws it twice.
+        var op = e[0].indexOf("heap.") === 0 ? "array." + e[0].slice(5) : e[0];
+        switch (op) {
           case "array.create":
-            st.arrays[e[1]] = { values: e[2].slice(), view: (e[3] && e[3].view) || "bars", label: (e[3] && e[3].label) || e[1], marks: {}, ptrs: {}, br: null };
+            st.arrays[e[1]] = { values: e[2].slice(), view: (e[3] && e[3].view) || "bars", label: (e[3] && e[3].label) || e[1], marks: {}, ptrs: {}, br: null, win: null, shift: 0 };
             if (st.order.indexOf(e[1]) < 0) st.order.push(e[1]);
             break;
           case "destroy":
-            delete st.arrays[e[1]]; delete st.graphs[e[1]]; delete st.trees[e[1]];
+            delete st.arrays[e[1]]; delete st.graphs[e[1]]; delete st.trees[e[1]]; delete st.tables[e[1]];
             st.order = st.order.filter(function (n) { return n !== e[1]; });
             break;
           case "array.get":
@@ -74,6 +77,24 @@
           case "array.label":
             if (a) a.label = e[2];
             break;
+          case "array.push":
+            if (a) { a.values.push(e[2]); (hot[e[1]] = hot[e[1]] || {})[a.values.length - 1] = "swap"; }
+            break;
+          case "array.pop":
+            if (a) { delete a.marks[a.values.length - 1]; a.values.pop(); }
+            break;
+          case "array.window":
+            if (a) a.win = e[2] === null ? null : [e[2], e[3]];
+            break;
+          case "array.shift":
+            if (a) a.shift = e[2];
+            break;
+          case "array.match":
+            var o = st.arrays[e[3]];
+            if (a) (hot[e[1]] = hot[e[1]] || {})[e[2]] = "compare";
+            if (o) (hot[e[3]] = hot[e[3]] || {})[e[4]] = "compare";
+            inc(st, "compare");
+            break;
         }
       });
       Object.keys(hot).forEach(function (n) { Object.keys(hot[n]).forEach(function (i) { st.seen[hot[n][i]] = true; }); });
@@ -84,6 +105,31 @@
       out.push(f);
     });
     return { frames: out, seen: Object.keys(st.seen), all: all };
+  }
+
+  // tableEvent applies one event of a table to the state. A fill lights the cells that the value comes from.
+  function tableEvent(st, e, hot2) {
+    var t = st.tables[e[1]], h;
+    if (e[0] === "table.create") {
+      st.tables[e[1]] = { label: e[2].label || e[1], rows: e[2].rows, cols: e[2].cols, rh: e[2].rowHeads, ch: e[2].colHeads, values: clone(e[2].values), marks: {}, from: {} };
+      if (st.order.indexOf(e[1]) < 0) st.order.push(e[1]);
+      return;
+    }
+    if (!t) return;
+    var k = e[2] + "," + e[3];
+    switch (e[0]) {
+      case "table.get": hotOf(hot2, e[1]).n[k] = "active"; st.seen.active = true; break;
+      case "table.fill":
+        t.values[e[2]][e[3]] = e[4];
+        t.from[k] = e[5].length ? e[5][0] : null;
+        h = hotOf(hot2, e[1]); h.n[k] = "swap"; st.seen.swap = true;
+        e[5].forEach(function (x) { h.n[x[0] + "," + x[1]] = "compare"; st.seen.compare = true; });
+        inc(st, "write");
+        break;
+      case "table.mark": t.marks[e[2][0] + "," + e[2][1]] = e[3]; st.seen[e[3]] = true; break;
+      case "table.unmark": delete t.marks[e[2][0] + "," + e[2][1]]; break;
+      case "table.label": t.label = e[2]; break;
+    }
   }
 
   function inc(st, name) { st.counters[name] = (st.counters[name] || 0) + 1; }
@@ -344,6 +390,11 @@
         if (fr.arrays[n]) fr.arrays[n].values.forEach(function (v) { if (typeof v === "number") self.max[n] = Math.max(self.max[n] || 0, Math.abs(v)); });
       });
     });
+    // All the strings use one column grid, wide enough for the longest string and its shift, so a pattern stays under its text.
+    this.strCols = 1;
+    this.f.forEach(function (fr) {
+      Object.keys(fr.arrays).forEach(function (n) { var a = fr.arrays[n]; if (a.view === "str") self.strCols = Math.max(self.strCols, a.shift + a.values.length); });
+    });
     // All arrays use one scale, so equal values have equal bars.
     this.top = Object.keys(this.max).reduce(function (t, n) { return Math.max(t, self.max[n]); }, 0);
     this.build();
@@ -388,10 +439,9 @@
       var kind = kindOf(self.f, n);
       if (kind === "graph") { self.views[n] = buildGraph(self, n); return; }
       if (kind === "tree") { self.views[n] = buildTree(self, n); return; }
-      var w = el("div", "arr"), lab = el("div", "arr-label"), cells = el("div", "arr-cells");
-      w.appendChild(lab); w.appendChild(cells);
-      self.stage.appendChild(w);
-      self.views[n] = { kind: "array", w: w, lab: lab, cells: cells, list: [] };
+      if (kind === "table") { self.views[n] = buildTable(self, n); return; }
+      if (kind === "heap") { self.views[n] = buildHeap(self, n); return; }
+      self.views[n] = buildArray(self.stage);
     });
     if (this.seen.length) {
       var lg = el("div", "legend");
@@ -414,33 +464,9 @@
       var v = self.views[n], a = fr.arrays[n];
       if (v.kind === "graph") { drawGraph(v, fr.graphs[n], fr.hot2[n]); return; }
       if (v.kind === "tree") { drawTree(v, fr.trees[n], fr.hot2[n]); return; }
-      v.w.hidden = !a;
-      if (!a) return;
-      v.w.className = "arr " + a.view + (a.values.length > 14 ? " dense" : "");
-      v.lab.textContent = a.label;
-      while (v.list.length < a.values.length) {
-        var c = el("div", "cell"), p = el("div", "ptrs"), bar = el("div", "blk"), val = el("div", "v"), idx = el("div", "i", String(v.list.length));
-        if (a.view === "cells") { bar.appendChild(val); c.appendChild(p); c.appendChild(bar); c.appendChild(idx); }
-        else { c.appendChild(p); c.appendChild(bar); c.appendChild(val); c.appendChild(idx); }
-        v.cells.appendChild(c);
-        v.list.push({ c: c, p: p, bar: bar, val: val });
-      }
-      var ptrAt = {};
-      Object.keys(a.ptrs).forEach(function (name) { var i = a.ptrs[name]; (ptrAt[i] = ptrAt[i] || []).push(name); });
-      var hot = fr.hot[n] || {}, m = self.top || 1;
-      v.list.forEach(function (x, i) {
-        x.c.hidden = i >= a.values.length;
-        if (i >= a.values.length) return;
-        var val = a.values[i];
-        x.val.textContent = fmt(val);
-        if (a.view === "bars") x.bar.style.height = (typeof val === "number" ? Math.max(0.2, Math.abs(val) / m * 6.4) : 3.2).toFixed(2) + "rem";
-        var s = hot[i] || a.marks[i] || "";
-        if (s) x.c.dataset.st = s; else delete x.c.dataset.st;
-        var out = a.br && (i < a.br[0] || (a.br[2] !== null && i > a.br[2]));
-        x.c.classList.toggle("out", !!out);
-        x.p.textContent = (ptrAt[i] || []).join(" ");
-      });
-      if (a.view === "bars") v.cells.style.height = "";
+      if (v.kind === "table") { drawTable(v, fr.tables[n], fr.hot2[n]); return; }
+      if (v.kind === "heap") { drawHeap(self, v, a, fr.hot[n] || {}); return; }
+      drawArray(self, v, a, fr.hot[n] || {});
     });
     var note = fr.note;
     this.noteEl.textContent = note || fr.phase || "";
@@ -456,6 +482,144 @@
     this.pos.textContent = (k + 1) + " / " + this.f.length;
   };
 
+  function buildArray(parent) {
+    var w = el("div", "arr"), lab = el("div", "arr-label"), cells = el("div", "arr-cells");
+    w.appendChild(lab); w.appendChild(cells);
+    parent.appendChild(w);
+    return { kind: "array", w: w, lab: lab, cells: cells, list: [] };
+  }
+
+  // drawArray draws an array as bars or cells, or a string as cells on the column grid of the strings. view replaces the view of the array, for the array half of a heap.
+  function drawArray(p, v, a, hot, view) {
+    v.w.hidden = !a;
+    if (!a) return;
+    view = view || a.view;
+    var str = view === "str", cellsLike = view === "cells" || str;
+    v.w.className = "arr " + (cellsLike ? "cells" : view) + (str ? " str" : "") + (!str && a.values.length > 14 ? " dense" : "");
+    v.lab.textContent = a.label;
+    if (str) v.cells.style.setProperty("--n", String(p.strCols));
+    while (v.list.length < a.values.length) {
+      var c = el("div", "cell"), pt = el("div", "ptrs"), bar = el("div", "blk"), val = el("div", "v"), idx = el("div", "i", String(v.list.length));
+      if (cellsLike) { bar.appendChild(val); c.appendChild(pt); c.appendChild(bar); c.appendChild(idx); }
+      else { c.appendChild(pt); c.appendChild(bar); c.appendChild(val); c.appendChild(idx); }
+      v.cells.appendChild(c);
+      v.list.push({ c: c, p: pt, bar: bar, val: val });
+    }
+    var ptrAt = {};
+    Object.keys(a.ptrs).forEach(function (name) { var i = a.ptrs[name]; (ptrAt[i] = ptrAt[i] || []).push(name); });
+    var m = p.top || 1;
+    v.list.forEach(function (x, i) {
+      x.c.hidden = i >= a.values.length;
+      if (i >= a.values.length) return;
+      var val = a.values[i];
+      x.val.textContent = str && val === " " ? "\u2423" : fmt(val);
+      if (view === "bars") x.bar.style.height = (typeof val === "number" ? Math.max(0.2, Math.abs(val) / m * 6.4) : 3.2).toFixed(2) + "rem";
+      var s = hot[i] || a.marks[i] || "";
+      if (s) x.c.dataset.st = s; else delete x.c.dataset.st;
+      var out = a.br && (i < a.br[0] || (a.br[2] !== null && i > a.br[2]));
+      x.c.classList.toggle("out", !!out);
+      x.c.classList.toggle("win", !!(a.win && i >= a.win[0] && i <= a.win[1]));
+      x.c.style.gridColumnStart = str && i === 0 ? String(a.shift + 1) : "";
+      x.p.textContent = (ptrAt[i] || []).join(" ");
+    });
+  }
+
+  // buildTable makes an HTML table with the size and the headers of the create event. The size does not change, so the stage keeps its height.
+  function buildTable(p, n) {
+    var t0 = null;
+    p.f.some(function (fr) { t0 = fr.tables[n]; return !!t0; });
+    var w = el("div", "tbl"), lab = el("div", "arr-label"), sc = el("div", "tbl-scroll"), tb = el("table", "tbl-grid"), cells = [];
+    if (t0.ch) {
+      var hr = el("tr");
+      if (t0.rh) hr.appendChild(el("th", "tbl-corner"));
+      t0.ch.forEach(function (h) { var th = el("th", null, fmt(h)); th.scope = "col"; hr.appendChild(th); });
+      var thead = el("thead"); thead.appendChild(hr); tb.appendChild(thead);
+    }
+    var body = el("tbody");
+    for (var r = 0; r < t0.rows; r++) {
+      var tr = el("tr"), row = [];
+      if (t0.rh) { var th = el("th", null, fmt(t0.rh[r])); th.scope = "row"; tr.appendChild(th); }
+      for (var c = 0; c < t0.cols; c++) {
+        var td = el("td"), arrow = el("span", "tbl-from"), val = el("span", "tbl-v");
+        arrow.setAttribute("aria-hidden", "true");
+        td.appendChild(arrow); td.appendChild(val); tr.appendChild(td);
+        row.push({ td: td, arrow: arrow, val: val });
+      }
+      body.appendChild(tr); cells.push(row);
+    }
+    tb.appendChild(body);
+    sc.appendChild(tb); w.appendChild(lab); w.appendChild(sc);
+    p.stage.appendChild(w);
+    return { kind: "table", w: w, lab: lab, cells: cells };
+  }
+
+  var ARROWS = { "-1,-1": "\u2196", "-1,0": "\u2191", "-1,1": "\u2197", "0,-1": "\u2190", "0,1": "\u2192", "1,-1": "\u2199", "1,0": "\u2193", "1,1": "\u2198" };
+  function drawTable(v, t, hot) {
+    v.w.hidden = !t;
+    if (!t) return;
+    hot = hot || { n: {} };
+    v.lab.textContent = t.label;
+    v.cells.forEach(function (row, r) {
+      row.forEach(function (x, c) {
+        var k = r + "," + c, val = t.values[r][c], s = hot.n[k] || t.marks[k] || "", f = t.from[k];
+        x.val.textContent = val === null || val === undefined ? "" : fmt(val);
+        x.arrow.textContent = f ? ARROWS[Math.sign(f[0] - r) + "," + Math.sign(f[1] - c)] || "" : "";
+        paint(x.td, s);
+        if (s) x.td.setAttribute("aria-label", x.val.textContent + " " + (NAMES[s] || s)); else x.td.removeAttribute("aria-label");
+      });
+    });
+  }
+
+  // buildHeap makes the tree of the heap over its array. The tree has room for the largest heap of the trace, so the stage keeps its height.
+  var HROW = 50;
+  function buildHeap(p, n) {
+    var most = 1;
+    p.f.forEach(function (fr) { if (fr.arrays[n]) most = Math.max(most, fr.arrays[n].values.length); });
+    var depth = Math.floor(Math.log2(most)) + 1, W = Math.max(320, Math.pow(2, depth - 1) * 34), H = depth * HROW + 8;
+    var w = el("div", "gv hv"), lab = el("div", "arr-label");
+    var box = svg("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "class": "gv-svg" });
+    box.style.maxWidth = Math.max(32, W / 10) + "rem";
+    var eg = svg("g", { "class": "gv-edges" }, box), ng = svg("g", { "class": "gv-nodes" }, box), nodes = [];
+    for (var i = 0; i < most; i++) {
+      var l = Math.floor(Math.log2(i + 1)), x = (i + 1 - Math.pow(2, l) + 0.5) * W / Math.pow(2, l), y = HROW / 2 + 4 + l * HROW, e = null;
+      if (i > 0) {
+        var q = (i - 1) >> 1, ql = Math.floor(Math.log2(q + 1)), qx = (q + 1 - Math.pow(2, ql) + 0.5) * W / Math.pow(2, ql), qy = y - HROW;
+        var dx = x - qx, dy = y - qy, len = Math.sqrt(dx * dx + dy * dy);
+        e = svg("line", { "class": "gv-edge", x1: (qx + dx / len * R).toFixed(1), y1: (qy + dy / len * R).toFixed(1), x2: (x - dx / len * R).toFixed(1), y2: (y - dy / len * R).toFixed(1) }, eg);
+      }
+      var g = svg("g", { "class": "gv-node", transform: "translate(" + x.toFixed(1) + " " + y.toFixed(1) + ")" }, ng);
+      svg("circle", { r: R }, g);
+      var t = svg("text", { y: 4, "class": "gv-id" }, g), ix = svg("text", { y: R + 11, "class": "gv-ix" }, g);
+      ix.textContent = String(i);
+      nodes.push({ g: g, t: t, e: e });
+    }
+    w.appendChild(lab); w.appendChild(box);
+    p.stage.appendChild(w);
+    var arr = buildArray(w);
+    arr.lab.hidden = true;
+    return { kind: "heap", w: w, lab: lab, box: box, nodes: nodes, arr: arr };
+  }
+
+  function drawHeap(p, v, a, hot) {
+    v.w.hidden = !a;
+    if (!a) return;
+    v.lab.textContent = a.label;
+    drawArray(p, v.arr, a, hot, "cells");
+    v.arr.w.hidden = false;
+    var words = [];
+    v.nodes.forEach(function (x, i) {
+      var on = i < a.values.length;
+      x.g.style.display = on ? "" : "none";
+      if (x.e) x.e.style.display = on ? "" : "none";
+      if (!on) return;
+      var s = hot[i] || a.marks[i] || "";
+      paint(x.g, s);
+      x.t.textContent = fmt(a.values[i]);
+      words.push(say(fmt(a.values[i]), s));
+    });
+    v.box.setAttribute("aria-label", a.label + " as a tree, level by level: " + (words.length ? words.join(", ") : "empty"));
+  }
+
   var NS = "http://www.w3.org/2000/svg", uid = 0;
   function svg(tag, attrs, parent) {
     var e = d.createElementNS(NS, tag);
@@ -467,7 +631,8 @@
     for (var i = 0; i < fs.length; i++) {
       if (fs[i].graphs[n]) return "graph";
       if (fs[i].trees[n]) return "tree";
-      if (fs[i].arrays[n]) return "array";
+      if (fs[i].tables[n]) return "table";
+      if (fs[i].arrays[n]) return fs[i].arrays[n].view === "heap" ? "heap" : "array";
     }
     return "array";
   }

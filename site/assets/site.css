@@ -320,6 +320,7 @@ mark { background: color-mix(in srgb, var(--st-compare) 35%, transparent); color
 .pl-custom summary { cursor: pointer; color: var(--soft); padding: 0.2rem 0; }
 .pl-custom textarea { width: 100%; font-family: var(--mono); font-size: 0.85rem; background: var(--bg); color: var(--text); border: 0; padding: 0.6rem; margin: 0.4rem 0; }
 .pl-err { color: var(--bad); margin: 0.3rem 0 0; min-height: 1em; }
+.pl-stage [hidden] { display: none !important; }
 .arr { display: flex; flex-direction: column; gap: 0.3rem; }
 .arr-label { font-size: 0.78rem; color: var(--muted); font-family: var(--mono); }
 .arr-cells { display: flex; gap: 2px; align-items: flex-end; position: relative; }
@@ -368,6 +369,20 @@ mark { background: color-mix(in srgb, var(--st-compare) 35%, transparent); color
 .gv-frontier { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; align-self: flex-start; min-height: 1.6rem; }
 .gv-chip { font: 600 0.8rem var(--mono); padding: 0.05rem 0.45rem; border-radius: 0.3rem; box-shadow: inset 0 0 0 2px var(--st-frontier); }
 .gv-empty { font-size: 0.8rem; color: var(--muted); }
+.gv-ix { font: 500 9px var(--mono); fill: var(--muted); text-anchor: middle; }
+.hv { gap: 0.6rem; }
+.hv > .arr { align-self: stretch; }
+.arr.str .arr-cells { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 2.2rem)); gap: 2px; }
+.arr.str .cell { max-width: none; }
+.arr.str .cell .v { font-size: 0.85rem; }
+.cell.win .i { color: var(--text); font-weight: 700; box-shadow: inset 0 2px 0 var(--st-frontier); }
+.tbl { display: flex; flex-direction: column; gap: 0.3rem; }
+.tbl-scroll { overflow-x: auto; }
+.tbl-grid { border-collapse: separate; border-spacing: 2px; margin: 0 auto; font: 0.8rem var(--mono); font-variant-numeric: tabular-nums; }
+.tbl-grid th { font-weight: 600; color: var(--muted); padding: 0 0.3rem; text-align: center; }
+.tbl-grid td { position: relative; min-width: 1.9rem; height: 1.9rem; text-align: center; background: var(--bg); box-shadow: inset 0 0 0 1px var(--st-default); color: var(--text); font-weight: 600; }
+.tbl-grid td[data-st] { box-shadow: inset 0 0 0 3px var(--c); background: color-mix(in srgb, var(--c) 18%, var(--bg)); }
+.tbl-from { position: absolute; top: 0; left: 0.15rem; font-size: 0.6rem; line-height: 1; color: var(--muted); font-weight: 400; }
 .legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 0.75rem; color: var(--muted); }
 .legend span::before { content: ""; display: inline-block; width: 0.7rem; height: 0.7rem; margin-right: 0.3rem; vertical-align: -0.05rem; background: var(--c); }
 .viz-page .player { min-height: 28rem; }
