@@ -37,7 +37,9 @@ func (r *Runner) Gen(dir string, n *node.Node, im node.Impl) (Tree, error) {
 	for _, f := range im.Files {
 		t.Sources[f.Name] = f.Path
 	}
-	cmds, err := rc.Run(r, dir, n, im)
+	g := *r
+	g.Generate = true
+	cmds, err := rc.Run(&g, dir, n, im)
 	if err != nil {
 		return t, err
 	}

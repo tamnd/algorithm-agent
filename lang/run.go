@@ -69,6 +69,8 @@ type Runner struct {
 	TempDir string
 	// CaseTimeout is the longest time of one case. The default is the constant CaseTimeout. The mutation run uses a shorter time, because a mutant that loops forever is common.
 	CaseTimeout time.Duration
+	// Generate is set when the runner only writes a build tree (algo gen). The tree runs later in a runner image, so the tools of this machine are not checked.
+	Generate bool
 }
 
 // Available tells if the language can run with this runner. In a sandbox, the image replaces the tools of this machine.
@@ -219,7 +221,7 @@ func write(dir, name, content string) error {
 
 func python(r *Runner, dir string, _ *node.Node, _ node.Impl) ([][]string, error) {
 	// The runner image has pytest.
-	if r.Box == nil && exec.Command("python3", "-c", "import pytest").Run() != nil {
+	if r.Box == nil && !r.Generate && exec.Command("python3", "-c", "import pytest").Run() != nil {
 		return nil, Skip{"python", "pytest"}
 	}
 	return [][]string{{"python3", "-m", "pytest", "-q", "-p", "no:cacheprovider", "."}}, nil
