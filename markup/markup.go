@@ -2,7 +2,7 @@
 //
 // It adds four things to CommonMark and GFM:
 //   - [[slug]] and [[slug|text]] link to a node;
-//   - $...$ is inline math and a ```math block is display math, which KaTeX renders in the browser;
+//   - $...$ is inline math, and $$...$$ or a ```math block is display math, which KaTeX renders at build time;
 //   - a ```pseudo block is pseudocode with stable line ids (spec 06.4);
 //   - other fenced blocks are highlighted with Chroma at build time.
 package markup
@@ -66,6 +66,8 @@ func Render(src string, resolve Resolver) (Result, error) {
 // RenderWith renders Markdown to HTML with the options.
 func RenderWith(src string, opt Options) (Result, error) {
 	var res Result
+	src, bad := displayMath(src)
+	res.MathErrors = append(res.MathErrors, bad...)
 	src = linkWiki(src, opt.Resolve, &res)
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.GFM, extension.Footnote, mathExt{}),
