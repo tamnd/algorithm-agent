@@ -99,3 +99,44 @@ func TestPseudoIndent(t *testing.T) {
 		}
 	}
 }
+
+func TestDisplayMathDollars(t *testing.T) {
+	cases := map[string]string{
+		"one line, spaces":   "Then\n$$ a < b, \\qquad c $$\nand so on.",
+		"one line, no space": "$$T(n) = 2T(n/2) + n.$$",
+		"several lines":      "Text\n$$\nx = 1\n$$\n",
+		"inline in a line":   "We have $$x^2$$ here.",
+		"indented in a list": "- item\n\n  $$ y = 2 $$\n",
+	}
+	for name, src := range cases {
+		res, err := Render(src, nil)
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		if strings.Contains(res.HTML, "$$") || strings.Contains(res.HTML, "$<span") {
+			t.Errorf("%s: raw $$ in %q", name, res.HTML)
+		}
+		if !strings.Contains(res.HTML, "math") {
+			t.Errorf("%s: no math in %q", name, res.HTML)
+		}
+		if len(res.MathErrors) != 0 {
+			t.Errorf("%s: errors %v", name, res.MathErrors)
+		}
+	}
+	if !strings.Contains(mustRender(t, "Then\n$$ a $$\nand").HTML, `class="math display"`) {
+		t.Error("a $$ line is not display math")
+	}
+	res, _ := Render("$$\nx = 1\n\nmore", nil)
+	if len(res.MathErrors) != 1 {
+		t.Errorf("unclosed $$ not reported: %v", res.MathErrors)
+	}
+}
+
+func mustRender(t *testing.T, src string) Result {
+	t.Helper()
+	res, err := Render(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
