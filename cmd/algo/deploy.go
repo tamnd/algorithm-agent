@@ -13,13 +13,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 )
 
 // The limits of Cloudflare Pages, with a margin: 20000 files in a deployment and 25 MiB for one file.
 const (
 	maxSiteFiles = 19500
 	maxFileBytes = 24 << 20
+	// maxDynamicRedirects is the most rules with a placeholder or a splat that Pages reads from _redirects.
+	maxDynamicRedirects = 100
+	// maxStaticRedirects is the most other rules that Pages reads from _redirects.
+	maxStaticRedirects = 2000
 )
 
 // wranglerVersion is the version of wrangler that algo site deploy runs. A pinned version gives the same upload each time.
@@ -52,6 +55,25 @@ func checkLimits(dir string) (files int, problems []string, err error) {
 	})
 	if files > maxSiteFiles {
 		problems = append(problems, fmt.Sprintf("the site has %d files, and the limit is %d", files, maxSiteFiles))
+	}
+	if data, rerr := os.ReadFile(filepath.Join(dir, "_redirects")); rerr == nil {
+		static, dynamic := 0, 0
+		for _, line := range strings.Split(string(data), "\n") {
+			f := strings.Fields(line)
+			switch {
+			case len(f) == 0 || strings.HasPrefix(f[0], "#"):
+			case strings.ContainsAny(f[0], ":*"):
+				dynamic++
+			default:
+				static++
+			}
+		}
+		if static > maxStaticRedirects {
+			problems = append(problems, fmt.Sprintf("_redirects has %d rules without a placeholder, and the limit is %d", static, maxStaticRedirects))
+		}
+		if dynamic > maxDynamicRedirects {
+			problems = append(problems, fmt.Sprintf("_redirects has %d rules with a placeholder or a splat, and the limit is %d", dynamic, maxDynamicRedirects))
+		}
 	}
 	return files, problems, err
 }
@@ -94,17 +116,6 @@ func deploy(o deployOptions) error {
 	}
 	if o.Preview && o.Branch == "main" {
 		return errors.New("a preview needs a branch other than main")
-	}
-	build := o.Commit
-	if build == "" {
-		build = fmt.Sprint(time.Now().Unix())
-	}
-	n, err := packSite(o.Dir, build)
-	if err != nil {
-		return fmt.Errorf("pack the site: %w", err)
-	}
-	if n > 0 {
-		fmt.Fprintf(os.Stderr, "packed %d files\n", n)
 	}
 	files, problems, err := checkLimits(o.Dir)
 	if err != nil {

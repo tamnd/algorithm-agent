@@ -23,15 +23,15 @@ The node namespace is flat at the root of the site. Each node is at `/<slug>/`, 
 |---|---|
 | `/` | home (14.7.1) |
 | `/<slug>/` | the node page of any kind (14.4, 14.7) |
-| `/<slug>/<lang>/` | the implementation of an algorithm or a data structure in one language, for example `/dijkstra/rust/` (14.7.5). `<lang>` is a language id of `registers/languages.yaml` (08.2) |
-| `/<slug>/proof/` | every human proof of the node at full length (14.7.6) |
+| `/<slug>/<lang>/` | a redirect to `/<slug>/#code-<lang>`, the tab of that language on the node page, for example `/dijkstra/rust/` (14.7.5). `<lang>` is a language id of `registers/languages.yaml` (08.2) |
+| `/<slug>/proof/` | a redirect to `/<slug>/#proofs`, where the node page has every human proof at full length (14.7.6) |
 | `/<slug>/lean/` | the Lean part: spec, model, theorems and the highlighted module (14.7.7) |
 | `/<slug>/visualize/` | the full-window player (14.7.8) |
 | `/<slug>/tests/` | the contract and the shared cases, for a problem or an abstract type (14.7.3) |
-| `/<slug>.md`, `/<slug>.json` | the machine copies of the node (14.8) |
-| `/<slug>/<lang>.txt` | the raw source file of the implementation, `text/plain` |
+| `/<slug>.md` | the Markdown copy of a written node (14.8). The JSON record of each node is in `/api/nodes.json` |
+| `/<slug>/<lang>.txt` | a redirect to `/<slug>/#code-<lang>`. The **Raw** link of a tab opens the file on GitHub |
 | `/embed/<slug>/` | the player alone, for an `<iframe>` in slides and course pages (14.7.8) |
-| `/t/<tag>` | the node by tag; a redirect to `/<slug>/` |
+| `/t/<tag>` | the node by tag. Pages reads at most 2,000 rules from `_redirects`, and the tags are more, so `/api/moved.json` maps each tag and each alias to its node, and the 404 page sends the reader on |
 | `/t/<tag>@<release>` | the node in a release; a redirect to the release site (14.18) |
 | `/areas/` | the area tree (14.7.2) |
 | `/problems/` | the problem index (05.3) |
@@ -298,15 +298,17 @@ Code
 
 - The tab row has the 10 tier-1 languages in a fixed order, "More" for tier 2 (and tier 3 when they exist), and Lean last, because the Lean model is runnable code too.
 - The reader's language is remembered across pages in `localStorage` under `al-lang`. The URL fragment `#code-rust` selects a tab and wins over the stored choice. A page that has no implementation in the stored language shows the first tier-1 language and says "No Kotlin version yet. [Help write it]".
-- The tier-1 implementations are in the HTML of the page, highlighted at build time, so they work with no script (as stacked sections with headings) and are found by search engines. Tier-2 implementations are fetched from their language page when their tab is opened, to keep the page small (14.13).
+- The tier-1 implementations are in the HTML of the page, highlighted at build time, so they work with no script (as stacked sections with headings) and are found by search engines. Until the move to the Worker and R2, the tier-2 implementations are in the HTML too, because the site has no language pages (14.7.5). After the move, they are fetched from their language page when their tab is opened, to keep the page small (14.13).
 - The header line of each file names the file, the line count, the I-level in words, and an "AI · not reviewed" label when it applies.
-- **Copy** copies the file. **Raw** opens `/…/<lang>.txt`. **GitHub** opens the file at the commit of the build.
+- **Copy** copies the file. **Raw** opens the raw file on GitHub, on the branch main. **GitHub** opens the file on GitHub.
 - **Code sync.** Lines of an implementation that carry a `@line` marker (10.6) map to pseudocode lines. Hovering or focusing a pseudocode line highlights the matching code lines in the open tab, and the reverse.
 - **Tests** fold under the code: the native test file, and a line with the count of shared cases and generators that the implementation passed in the last build.
 
 ### 14.7.5 Language pages
 
-`/dijkstra/rust/` answers searches like "dijkstra in rust". It is a full page, not a copy of the node page:
+Until the move to the Worker and R2, a language has no page of its own. Pages takes at most 20,000 files, and a page for each language of each node would pass that limit early. The node page holds the code of each language in its tabs (14.7.4), so `/dijkstra/rust/` redirects to `/dijkstra/#code-rust`, and the fragment opens the Rust tab. `_redirects` has two rules with a placeholder for each language, `/:slug/<lang>/` and `/:slug/<lang>.txt`, and one for `/:slug/proof/`. Each rule also has a form without the final slash. Pages reads at most 100 rules with a placeholder and 2,000 without one, so `algo site deploy` fails when `_redirects` has more.
+
+After the move, `/dijkstra/rust/` becomes a full page again, as this list describes:
 
 - the title "Dijkstra's algorithm in Rust" and a two-line summary with the bound;
 - the full source file, highlighted, with Copy, Raw and GitHub;
@@ -317,11 +319,11 @@ Code
 - the pseudocode, folded, with code sync;
 - links: the node page, the same algorithm in the other languages, and the other algorithms of the same problem in Rust.
 
-The canonical URL of a language page is itself. Its structured data is `SoftwareSourceCode` (14.15).
+The canonical URL of such a page is itself. Its structured data is `SoftwareSourceCode` (14.15).
 
 ### 14.7.6 Proofs
 
-The main proof is on the node page. `/<slug>/proof/` has every proof of the node at full length (06.5): correctness by invariant, correctness by induction, each complexity proof, and alternative proofs.
+Every proof of the node is on the node page at full length (06.5), in the block `#proofs`: correctness by invariant, correctness by induction, each complexity proof, and alternative proofs. The first proof is open and the others are folded. `/<slug>/proof/` redirects to `/<slug>/#proofs`.
 
 The proof layout:
 
@@ -407,8 +409,8 @@ Each page has copies for programs, as in math2:
 | Path | Content |
 |---|---|
 | `/<slug>.md` | the node as Markdown: the front matter, the body, the proofs, and the tier-1 code as fenced blocks |
-| `/<slug>.json` | the node as JSON: the front matter, the computed ladders, the edges in both directions, the list of implementations with their paths and levels, the scene and its presets |
-| `/<slug>/<lang>.txt` | the raw implementation |
+| `/<slug>.json` | after the move to R2 only. Until then, the record of each node is in `/api/nodes.json`: the front matter, the computed ladders, the edges in both directions, the list of implementations with their paths and levels, the scene and its presets |
+| `/<slug>/<lang>.txt` | after the move to R2 only. Until then, the **Raw** link opens the file on GitHub |
 | `/api/nodes.json` | every node: tag, slug, kind, name, area, summary, levels. Sharded by kind when it passes 5 MB |
 | `/api/graph.json` | every edge |
 | `/api/problems/<slug>/cases.jsonl` | the shared cases of a problem, so other projects can test their code |
@@ -462,7 +464,7 @@ This does not fit one static deployment on any plan. The site uses the outlets o
 
 **The start.** Until the site has 19,500 files, it is one Cloudflare Pages project, `algorithm`, with the custom domain `algorithm.tamnd.com`. Pages takes at most 20,000 files and 25 MiB for each file. Each push to `main` deploys to production, and each pull request from the repository deploys a preview. The move to the Worker and R2 is an issue of M2, and the URLs do not change.
 
-**Packs on Pages.** The site passed 19,500 files at about 3,500 written nodes. Before the move to R2, `algo site deploy` packs the files that readers ask for less often: the `.md`, `.json` and `.txt` copies, the language, proof, Lean and visualize pages, and the embeds. `packs/N.pack` holds the bytes of its files one after another, and `packs/N.json` maps each path to its offset and length. The pack of a path is the FNV-1a hash of the path modulo the count of packs, and a pack has about 512 KB. A `_worker.js` serves each packed path with a range read of its pack, applies the rules of `_headers`, and gives each other path to the static files. `_routes.json` runs the worker only for the packed paths. The URLs do not change. With every node written, the tree has about 11,000 files.
+**Fewer files on Pages.** The site passed 19,500 files at about 3,500 written nodes. Until the move to the Worker and R2, the site writes only the files that need their own URL: the node page, the Markdown copy of a written node, the Lean and visualize pages, the embeds, and the list pages. The node page already has the code of each language and every proof, so the language pages, the proof pages and the `.txt` copies are redirects to the parts of the node page. The JSON record of each node is in `/api/nodes.json`. The site has no `_worker.js`: a Pages Function counts against the daily limit of the free plan, and when that limit is used up, Pages serves only the static files. With every node written, the tree has about 17,500 files.
 
 `registers/site-tiers.yaml` says which files go to the assets, and `algo site check` fails when the assets pass 95,000 files or a file passes 25 MiB.
 
@@ -555,7 +557,7 @@ The target is WCAG 2.2 level AA on every page.
 
 - **Titles.** Node pages: "Merge sort: algorithm, proof and code · algorithm". Language pages: "Merge sort in Rust · algorithm". Problem pages: "Sorting: the problem and every algorithm for it · algorithm".
 - **Descriptions** come from `summary`, at most 160 characters.
-- **Canonical** links on every page. Language pages are canonical to themselves; the `.md` and `.json` copies are not indexed (`X-Robots-Tag: noindex` on them).
+- **Canonical** links on every page. The `.md` copies are not indexed (`X-Robots-Tag: noindex` on them).
 - **Structured data** (JSON-LD): `TechArticle` for node pages, with `about`, `author` (people and, for agent text, the project as the publisher), `dateModified` and `isPartOf`; `SoftwareSourceCode` for language pages, with `programmingLanguage`, `codeRepository` and `license`; `BreadcrumbList` for the breadcrumb; `Course` for courses; `Person` for people; `Dataset` for `/api/`.
 - **Sitemaps**: `/sitemap.xml` is an index of sitemaps by kind and by language, each under 50,000 URLs, with `lastmod` from the provenance log.
 - **Social images**: one 1200 × 630 JPEG per node page, made by the build: the name, the kind, the area hue, the bound, and a frame of the scene when the node has one (10.7). Language pages reuse the image of their node with the language name added.

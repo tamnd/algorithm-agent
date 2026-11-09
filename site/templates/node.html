@@ -21,7 +21,7 @@
 {{range .Rungs}}<tr><th scope="row">{{.Ladder}}{{with .Lang}} ({{.}}){{end}}</th><td>{{template "rung" .Rung}} {{.Name}}</td><td>{{if .Next}}<ul>{{range .Next}}<li>{{.}}</li>{{end}}</ul>{{else}}This is the top level.{{end}}</td></tr>{{end}}
 </tbody></table>
 {{with .Tests}}<p>{{.}}</p>{{end}}
-<p class="page-links"><span>Tag <code>{{.N.Tag}}</code></span> <a href="{{.Edit}}">Edit this page</a> <a href="{{.History}}">History</a> <a href="{{.Report}}">Report an error</a> {{if .Copies}}<a href="/{{.N.Slug}}.md">Markdown</a> <a href="/{{.N.Slug}}.json">JSON</a>{{end}}</p>
+<p class="page-links"><span>Tag <code>{{.N.Tag}}</code></span> <a href="{{.Edit}}">Edit this page</a> <a href="{{.History}}">History</a> <a href="{{.Report}}">Report an error</a> {{if .Copies}}<a href="/{{.N.Slug}}.md">Markdown</a>{{end}}</p>
 </section>
 </div>
 </div>
@@ -44,7 +44,7 @@
 {{define "player-section"}}<section class="see-it-run"><h2 id="see-it-run">See it run</h2>{{template "player" .Player}}</section>
 {{end}}
 
-{{define "proofs-inline"}}<div class="proofs">{{range $i, $p := .Proofs}}<details class="proof" id="proof-{{.ID}}"{{if eq $i 0}} open{{end}}><summary><span class="proof-title">Proof: {{.Title}}</span>{{with .Status}}<span class="chip">{{.}}</span>{{end}}</summary><div class="proof-body">{{.HTML}}</div></details>{{end}}<p class="proof-all"><a href="/{{.N.Slug}}/proof/">All proofs on one page</a></p></div>
+{{define "proofs-inline"}}<div class="proofs" id="proofs">{{range $i, $p := .Proofs}}<details class="proof" id="proof-{{.ID}}"{{if eq $i 0}} open{{end}}><summary><span class="proof-title">Proof: {{.Title}}</span>{{with .Status}}<span class="chip">{{.}}</span>{{end}}</summary><div class="proof-body">{{.HTML}}</div></details>{{end}}</div>
 {{end}}
 
 {{define "known-algorithms"}}<h2 id="known-algorithms">Known algorithms</h2>
@@ -62,7 +62,7 @@
 <p>Each implementation follows the pseudocode above. A comment <code>@line</code> links a line of code to a line of the pseudocode. Point at a line of the pseudocode to see the matching code. The build runs the native tests of each language.</p>
 <div class="tabs" role="tablist" aria-label="Language">{{range .Impls}}<button type="button" role="tab" id="tab-{{.Lang}}" aria-controls="code-{{.Lang}}" aria-selected="{{.Selected}}" data-lang="{{.Lang}}">{{.Name}}</button>{{end}}</div>
 {{range .Impls}}<div class="panel{{if .Selected}} on{{end}}" role="tabpanel" id="code-{{.Lang}}" aria-labelledby="tab-{{.Lang}}" data-markers="{{.Markers}}">
-<div class="panel-bar"><span class="file">{{.File}}</span>{{template "rung" .Rung}}{{with .Test}}{{if .Pass}}<span class="test ok">tests pass</span>{{else}}<span class="test bad">tests fail</span>{{end}}{{end}}<span class="grow"></span><a href="/{{$.N.Slug}}/{{.Lang}}/">Page</a><a href="{{.Raw}}">Raw</a><a href="{{.GitHub}}">GitHub</a><button type="button" class="copy" data-copy>Copy</button></div>
+<div class="panel-bar"><span class="file">{{.File}}</span>{{template "rung" .Rung}}{{with .Test}}{{if .Pass}}<span class="test ok">tests pass</span>{{else}}<span class="test bad">tests fail</span>{{end}}{{end}}<span class="grow"></span><a href="{{.Raw}}">Raw</a><a href="{{.GitHub}}">GitHub</a><button type="button" class="copy" data-copy>Copy</button></div>
 {{.HTML}}
 {{range .Tests}}<details class="tests"><summary>{{.Name}} <span>{{.Lines}} lines</span></summary>{{.HTML}}</details>{{end}}
 </div>{{end}}

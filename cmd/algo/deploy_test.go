@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,5 +53,23 @@ func TestDeployNeedsCredentials(t *testing.T) {
 	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "y")
 	if err := deploy(deployOptions{Dir: t.TempDir(), Project: "p", Branch: "dev"}); err == nil || !strings.Contains(err.Error(), "-preview") {
 		t.Errorf("a production deploy of a branch = %v", err)
+	}
+}
+
+func TestCheckLimitsRedirects(t *testing.T) {
+	dir := t.TempDir()
+	var s strings.Builder
+	for i := 0; i <= maxDynamicRedirects; i++ {
+		fmt.Fprintf(&s, "/:slug/l%d/ /:slug/#code-l%d 301\n", i, i)
+	}
+	for i := 0; i <= maxStaticRedirects; i++ {
+		fmt.Fprintf(&s, "/old%d /new%d/ 301\n", i, i)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "_redirects"), []byte(s.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, problems, err := checkLimits(dir)
+	if err != nil || len(problems) != 2 {
+		t.Errorf("checkLimits = %q, %v", problems, err)
 	}
 }
