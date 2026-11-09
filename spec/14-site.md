@@ -462,6 +462,8 @@ This does not fit one static deployment on any plan. The site uses the outlets o
 
 **The start.** Until the site has 19,500 files, it is one Cloudflare Pages project, `algorithm`, with the custom domain `algorithm.tamnd.com`. Pages takes at most 20,000 files and 25 MiB for each file. Each push to `main` deploys to production, and each pull request from the repository deploys a preview. The move to the Worker and R2 is an issue of M2, and the URLs do not change.
 
+**Packs on Pages.** The site passed 19,500 files at about 3,500 written nodes. Before the move to R2, `algo site deploy` packs the files that readers ask for less often: the `.md`, `.json` and `.txt` copies, the language, proof, Lean and visualize pages, and the embeds. `packs/N.pack` holds the bytes of its files one after another, and `packs/N.json` maps each path to its offset and length. The pack of a path is the FNV-1a hash of the path modulo the count of packs, and a pack has about 512 KB. A `_worker.js` serves each packed path with a range read of its pack, applies the rules of `_headers`, and gives each other path to the static files. `_routes.json` runs the worker only for the packed paths. The URLs do not change. With every node written, the tree has about 11,000 files.
+
 `registers/site-tiers.yaml` says which files go to the assets, and `algo site check` fails when the assets pass 95,000 files or a file passes 25 MiB.
 
 **The Worker** (in `algorithm-agent/worker/`, a few hundred lines) does:

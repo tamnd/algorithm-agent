@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // The limits of Cloudflare Pages, with a margin: 20000 files in a deployment and 25 MiB for one file.
@@ -93,6 +94,17 @@ func deploy(o deployOptions) error {
 	}
 	if o.Preview && o.Branch == "main" {
 		return errors.New("a preview needs a branch other than main")
+	}
+	build := o.Commit
+	if build == "" {
+		build = fmt.Sprint(time.Now().Unix())
+	}
+	n, err := packSite(o.Dir, build)
+	if err != nil {
+		return fmt.Errorf("pack the site: %w", err)
+	}
+	if n > 0 {
+		fmt.Fprintf(os.Stderr, "packed %d files\n", n)
 	}
 	files, problems, err := checkLimits(o.Dir)
 	if err != nil {
