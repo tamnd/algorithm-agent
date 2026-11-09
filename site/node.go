@@ -211,19 +211,7 @@ func (b *builder) nodes() error {
 		if err := b.page("node", "/"+n.Slug+"/", p); err != nil {
 			return err
 		}
-		for _, im := range p.Impls {
-			if err := b.langPage(p, im); err != nil {
-				return err
-			}
-		}
-		if len(p.Proofs) > 0 {
-			pp := *p
-			pp.Base = b.base("Proofs: "+n.Name, "Every human proof of "+n.Name+", at full length.", "/"+n.Slug+"/proof/")
-			pp.Hue, pp.Crumbs = p.Hue, append(slices.Clone(p.Crumbs), Link{Name: n.Name, URL: "/" + n.Slug + "/"})
-			if err := b.page("proof", pp.Path, pp); err != nil {
-				return err
-			}
-		}
+		// The code of each language and every proof are on the node page. _redirects sends the old language and proof pages there (spec 14.2).
 		if p.Lean != nil {
 			lp := *p
 			lp.Base = b.base("Lean: "+n.Name, "The Lean model, specification and proofs of "+n.Name+".", p.Lean.URL)
@@ -572,7 +560,7 @@ func (b *builder) implViews(n *node.Node) []ImplView {
 		v.File = main.Name
 		v.Lines = strings.Count(main.Content, "\n")
 		v.HTML = template.HTML(markup.Highlight(main.Content, lexer))
-		v.Raw = "/" + n.Slug + "/" + im.Lang + ".txt"
+		v.Raw = fmt.Sprintf("%s/raw/main/%s", b.opt.Repo, filepath.ToSlash(main.Path))
 		v.GitHub = fmt.Sprintf("%s/blob/main/%s", b.opt.Repo, filepath.ToSlash(main.Path))
 		v.Markers = markerMap(main.Content)
 		for _, f := range im.Files {
@@ -674,35 +662,6 @@ func (b *builder) sourceViews(n *node.Node) []SourceView {
 		out = append(out, v)
 	}
 	return out
-}
-
-// LangPage is the page of one implementation.
-type LangPage struct {
-	*NodePage
-	I     ImplView
-	Lang  *node.Lang
-	Other []Link
-}
-
-func (b *builder) langPage(p *NodePage, im ImplView) error {
-	n := p.N
-	lp := &LangPage{NodePage: p, I: im, Lang: b.c.LangByID[im.Lang]}
-	cp := *p
-	lp.NodePage = &cp
-	lp.Base = b.base(n.Name+" in "+im.Name, fmt.Sprintf("%s in %s, with tests. %s", n.Name, im.Name, n.Summary), "/"+n.Slug+"/"+im.Lang+"/")
-	lp.Hue = p.Hue
-	lp.Crumbs = append(slices.Clone(p.Crumbs), Link{Name: n.Name, URL: "/" + n.Slug + "/"})
-	lp.Scripts = nil
-	for _, o := range p.Impls {
-		if o.Lang != im.Lang {
-			lp.Other = append(lp.Other, Link{Name: o.Name, URL: "/" + n.Slug + "/" + o.Lang + "/"})
-		}
-	}
-	if err := b.page("lang", lp.Path, lp); err != nil {
-		return err
-	}
-	main := n.Lang(im.Lang).Main()
-	return b.write("/"+n.Slug+"/"+im.Lang+".txt", []byte(main.Content))
 }
 
 func jsonLD(b *builder, n *node.Node) template.JS {

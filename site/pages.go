@@ -393,7 +393,7 @@ func (b *builder) languages() error {
 		sort.Slice(ns, func(i, j int) bool { return ns[i].Name < ns[j].Name })
 		for _, n := range ns {
 			it := b.item(n)
-			it.URL = "/" + n.Slug + "/" + l.ID + "/"
+			it.URL = "/" + n.Slug + "/#code-" + l.ID
 			it.Chips = nil
 			r := b.status[n.Slug].I[l.ID]
 			it.Chips = []string{r.Label + " " + r.Name}
@@ -448,7 +448,7 @@ func (b *builder) matrix() error {
 		for _, l := range b.c.Langs {
 			c := MatrixCell{}
 			if r, ok := s.I[l.ID]; ok {
-				c = MatrixCell{Has: true, Level: r.Level, Label: r.Label, Title: l.Name + ": " + r.Name, URL: "/" + n.Slug + "/" + l.ID + "/"}
+				c = MatrixCell{Has: true, Level: r.Level, Label: r.Label, Title: l.Name + ": " + r.Name, URL: "/" + n.Slug + "/#code-" + l.ID}
 			}
 			row.Cells = append(row.Cells, c)
 		}
@@ -491,7 +491,7 @@ func (b *builder) pages() error {
 		return err
 	}
 	nf := DocPage{Base: b.base("Page not found", "This page does not exist.", "/404/"), Heading: "Page not found", Lead: "This page does not exist yet. Maybe nobody wrote it, or the address has a mistake."}
-	nf.NoIndex = true
+	nf.NoIndex, nf.BodyKind = true, "notfound"
 	nf.Body = template.HTML(`<p>Use the search, or go to the <a href="/areas/">areas</a>. If you think that the page must exist, <a href="` + b.opt.Repo + `/issues/new?template=node.yml">open an issue</a>.</p>`)
 	if err := b.page("doc", "/404/", nf); err != nil {
 		return err
@@ -617,7 +617,7 @@ func (b *builder) machine() error {
 	}
 	var all []apiNode
 	var llms strings.Builder
-	fmt.Fprintf(&llms, "# Algorithm\n\n> Algorithms and data structures, explained in plain words, proved by hand and in Lean, implemented and tested in many languages, and shown step by step.\n\nEach page has a Markdown copy at /<slug>.md and a JSON record at /<slug>.json. The list of every page is at /api/nodes.json. The text is CC BY-SA 4.0. The code is MIT.\n")
+	fmt.Fprintf(&llms, "# Algorithm\n\n> Algorithms and data structures, explained in plain words, proved by hand and in Lean, implemented and tested in many languages, and shown step by step.\n\nEach written page has a Markdown copy at /<slug>.md. The JSON record of every page is in /api/nodes.json. The text is CC BY-SA 4.0. The code is MIT.\n")
 	groups := map[string][]*node.Node{}
 	for _, n := range b.c.Nodes {
 		a := apiNode{Front: n.Front, URL: b.opt.BaseURL + "/" + n.Slug + "/", Path: n.Rel, Status: b.status[n.Slug], Scene: n.Scene != ""}
@@ -631,13 +631,6 @@ func (b *builder) machine() error {
 		groups[n.Kind] = append(groups[n.Kind], n)
 		if isStub(n) {
 			continue
-		}
-		data, err := json.MarshalIndent(a, "", "  ")
-		if err != nil {
-			return err
-		}
-		if err := b.write("/"+n.Slug+".json", append(data, '\n')); err != nil {
-			return err
 		}
 		md, err := os.ReadFile(filepath.Join(n.Dir, "node.md"))
 		if err != nil {

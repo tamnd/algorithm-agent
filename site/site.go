@@ -533,11 +533,17 @@ func (b *builder) finish() error {
 		fmt.Fprintf(&sm, "  <url><loc>%s%s</loc><lastmod>%s</lastmod></url>\n", b.opt.BaseURL, p, b.meta.Date)
 	}
 	sm.WriteString("</urlset>\n")
+	rules, moved := b.redirects()
+	movedJSON, err := json.Marshal(moved)
+	if err != nil {
+		return err
+	}
 	files := map[string]string{
-		"sitemap.xml": sm.String(),
-		"robots.txt":  "User-agent: *\nAllow: /\n\nSitemap: " + b.opt.BaseURL + "/sitemap.xml\n",
-		"_headers":    headers,
-		"_redirects":  b.redirects(),
+		"_redirects":     rules,
+		"api/moved.json": string(movedJSON),
+		"sitemap.xml":    sm.String(),
+		"robots.txt":     "User-agent: *\nAllow: /\n\nSitemap: " + b.opt.BaseURL + "/sitemap.xml\n",
+		"_headers":       headers,
 		"opensearch.xml": `<?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
   <ShortName>Algorithm</ShortName>
@@ -594,11 +600,20 @@ const headers = `/*
   Content-Type: text/plain; charset=utf-8
 `
 
-func (b *builder) redirects() string {
+// redirects returns the rules of _redirects and the map of the other moved paths. Pages reads at most 2,000 rules without a placeholder and 100 with one. The rules hold the old sub-pages and the old slugs of registers/aliases.reg. The tags and the aliases of the nodes are more than 2,000, so they go to /api/moved.json, and the 404 page sends the reader on with the map.
+func (b *builder) redirects() (string, map[string]string) {
 	var s strings.Builder
+	moved := map[string]string{}
+	// The code of each language and every proof are on the node page, so the old sub-pages go to their part of it. These rules come first, so that no other rule hides them.
+	for _, l := range b.c.Langs {
+		fmt.Fprintf(&s, "/:slug/%s/ /:slug/#code-%s 301\n", l.ID, l.ID)
+		fmt.Fprintf(&s, "/:slug/%s /:slug/#code-%s 301\n", l.ID, l.ID)
+		fmt.Fprintf(&s, "/:slug/%s.txt /:slug/#code-%s 301\n", l.ID, l.ID)
+	}
+	s.WriteString("/:slug/proof/ /:slug/#proofs 301\n/:slug/proof /:slug/#proofs 301\n")
 	for _, n := range b.c.Nodes {
 		if n.Tag != "" {
-			fmt.Fprintf(&s, "/t/%s /%s/ 301\n", n.Tag, n.Slug)
+			moved["/t/"+n.Tag] = "/" + n.Slug + "/"
 		}
 	}
 	seen := map[string]bool{}
@@ -614,10 +629,9 @@ func (b *builder) redirects() string {
 	for _, o := range olds {
 		if to := b.c.OldSlugs[o]; !seen[o] && b.c.BySlug[to] != nil {
 			seen[o] = true
-			// The splat keeps the pages under the node, such as /old/python/ and /old/proof/.
+			// The splat keeps the pages under the node, such as /old/visualize/.
 			fmt.Fprintf(&s, "/%s /%s/ 301\n", o, to)
 			fmt.Fprintf(&s, "/%s/* /%s/:splat 301\n", o, to)
-			fmt.Fprintf(&s, "/%s.json /%s.json 301\n", o, to)
 			fmt.Fprintf(&s, "/%s.md /%s.md 301\n", o, to)
 			fmt.Fprintf(&s, "/embed/%s/ /embed/%s/ 301\n", o, to)
 		}
@@ -629,10 +643,10 @@ func (b *builder) redirects() string {
 				continue
 			}
 			seen[s2] = true
-			fmt.Fprintf(&s, "/%s/ /%s/ 301\n", s2, n.Slug)
+			moved["/"+s2] = "/" + n.Slug + "/"
 		}
 	}
-	return s.String()
+	return s.String(), moved
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)

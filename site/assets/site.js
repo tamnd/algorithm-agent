@@ -158,4 +158,12 @@
     }, { rootMargin: "0px 0px -70% 0px", threshold: [0, 1] });
     heads.forEach(function (h) { io.observe(h); });
   }
+  // The 404 page looks up the path in the map of moved paths, the tags and the aliases of the nodes, and sends the reader on.
+  if (d.body.classList.contains("page-notfound")) {
+    var path = location.pathname.replace(/\/+$/, "") || "/";
+    fetch("/api/moved.json").then(function (r) { return r.ok ? r.json() : {}; }).then(function (m) {
+      var to = m[path] || m[path.toLowerCase()];
+      if (to) location.replace(to + location.search + location.hash);
+    }).catch(function () {});
+  }
 })();

@@ -45,10 +45,13 @@ func TestMv(t *testing.T) {
 		t.Fatalf("algo site build exits with %d", got)
 	}
 	red, _ := os.ReadFile(filepath.Join(out, "_redirects"))
-	for _, want := range []string{"/binary-search/* /binary-search-on-arrays/:splat 301\n", "/binary-search /binary-search-on-arrays/ 301\n", "/t/2B7QDX /binary-search-on-arrays/ 301\n"} {
+	for _, want := range []string{"/binary-search/* /binary-search-on-arrays/:splat 301\n", "/binary-search /binary-search-on-arrays/ 301\n"} {
 		if !strings.Contains(string(red), want) {
 			t.Errorf("_redirects has no line %q", want)
 		}
+	}
+	if moved, _ := os.ReadFile(filepath.Join(out, "api", "moved.json")); !strings.Contains(string(moved), `"/t/2B7QDX":"/binary-search-on-arrays/"`) {
+		t.Errorf("moved.json has no tag of the moved node:\n%s", moved)
 	}
 
 	// A second move points the first old slug to the newest slug, so no redirect is a chain.

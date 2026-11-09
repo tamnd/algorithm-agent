@@ -1,6 +1,0 @@
-{{define "main"}}<div class="page doc">
-{{template "crumbs" .Crumbs}}
-<header class="page-head"><h1>Proofs: {{.N.Name}}</h1><p class="lead">These are the human proofs of {{.N.Name}}, at full length.</p></header>
-<div class="prose">{{range .Proofs}}<section class="proof-full" id="proof-{{.ID}}"><h2>{{.Title}}{{with .Status}} <span class="chip">{{.}}</span>{{end}}</h2>{{with .Proves}}<p class="proves">This proof shows: {{join . ", "}}.</p>{{end}}{{.HTML}}</section>{{end}}</div>
-<p><a href="/{{.N.Slug}}/">Back to {{.N.Name}}</a></p>
-</div>{{end}}
