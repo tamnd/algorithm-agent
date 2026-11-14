@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/tamnd/algorithm-agent/contract"
@@ -409,8 +410,12 @@ func goAdapter(j *adapterJob) error {
 	if err := write(j.Dir, "algoadapter/main.go", b.String()); err != nil {
 		return err
 	}
-	j.Build = [][]string{{"go", "build", "-o", "algo_adapter", "./algoadapter"}}
-	j.Run = []string{"./algo_adapter"}
+	exe := "algo_adapter"
+	if runtime.GOOS == "windows" {
+		exe += ".exe"
+	}
+	j.Build = [][]string{{"go", "build", "-o", exe, "./algoadapter"}}
+	j.Run = []string{"./" + exe}
 	return nil
 }
 

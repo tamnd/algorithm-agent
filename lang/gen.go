@@ -89,6 +89,7 @@ func (t Tree) Rewrite(s string) string {
 	}
 	for _, d := range dirs {
 		s = strings.ReplaceAll(s, d+string(filepath.Separator), "")
+		s = strings.ReplaceAll(s, filepath.ToSlash(d)+"/", "")
 	}
 	names := make([]string, 0, len(t.Sources))
 	for g := range t.Sources {
