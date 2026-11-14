@@ -231,7 +231,8 @@ func Read(root, dir string) (*Node, error) {
 	n.Rel, _ = filepath.Rel(root, dir)
 	n.Rel = filepath.ToSlash(n.Rel)
 
-	var raw map[string]any
+	// Keep each value as a node. A map of any turns a tag such as 860E65 into the float 8.6e+67.
+	var raw map[string]yaml.Node
 	if err := yaml.Unmarshal(front, &raw); err != nil {
 		return nil, fmt.Errorf("%s: front matter: %w", path, err)
 	}
