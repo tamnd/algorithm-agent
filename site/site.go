@@ -592,10 +592,6 @@ const headers = `/*
 /*.json
   Access-Control-Allow-Origin: *
 
-/*.md
-  Content-Type: text/markdown; charset=utf-8
-  Access-Control-Allow-Origin: *
-
 /*.txt
   Content-Type: text/plain; charset=utf-8
 `

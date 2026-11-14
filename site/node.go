@@ -37,7 +37,7 @@ type NodePage struct {
 	Player   *PlayerView
 	Sources  []SourceView
 	Edit     string
-	Copies   bool // the page has the Markdown and JSON copies; a stub has none
+	Markdown string // the raw node.md on GitHub; empty for a stub
 	History  string
 	Report   string
 	Tests    string // the summary line of the native tests
@@ -251,7 +251,9 @@ func (b *builder) nodePage(n *node.Node) (*NodePage, error) {
 	p.Crumbs = b.crumbs(n)
 	p.Status = b.status[n.Slug]
 	p.Edit = fmt.Sprintf("%s/edit/main/%s/node.md", b.opt.Repo, filepath.ToSlash(n.Rel))
-	p.Copies = !isStub(n)
+	if !isStub(n) {
+		p.Markdown = b.rawMarkdown(n)
+	}
 	p.History = fmt.Sprintf("%s/commits/main/%s", b.opt.Repo, filepath.ToSlash(n.Rel))
 	p.Report = b.opt.Repo + "/issues/new?" + url.Values{"template": {"error.yml"}, "title": {"Error on " + n.Name}, "url": {b.opt.BaseURL + "/" + n.Slug + "/"}}.Encode()
 	p.Prereqs = b.links(n.Prereqs)
@@ -687,7 +689,12 @@ func jsonLD(b *builder, n *node.Node) template.JS {
 	return template.JS(bs)
 }
 
-// isStub reports whether a node has no section yet. A stub has only its front matter and a lead, so the site gives it no Markdown or JSON copy. This keeps the file count of a large skeleton under the limit of the host.
+// rawMarkdown is the URL of the node.md of n on GitHub. The site keeps no Markdown copy of its own, because one file for each node takes the site over the file limit of Pages (spec 14.8).
+func (b *builder) rawMarkdown(n *node.Node) string {
+	return fmt.Sprintf("%s/raw/main/%s/node.md", b.opt.Repo, filepath.ToSlash(n.Rel))
+}
+
+// isStub reports whether a node has no section yet. A stub has only its front matter and a lead, so the site gives it no Markdown link.
 func isStub(n *node.Node) bool {
 	return !strings.HasPrefix(n.Body, "## ") && !strings.Contains(n.Body, "\n## ")
 }

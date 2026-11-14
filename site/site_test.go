@@ -85,3 +85,29 @@ func TestBuildReplacesOutput(t *testing.T) {
 		t.Error("the build left its work directory")
 	}
 }
+
+// The site writes no Markdown file for each node, and the node records are in one shard for each area (spec 14.8).
+func TestMachineCopies(t *testing.T) {
+	out := buildTest(t)
+	if _, err := os.Stat(filepath.Join(out, "binary-search.md")); err == nil {
+		t.Error("binary-search.md is written, and the site must link node.md on GitHub")
+	}
+	idx, err := os.ReadFile(filepath.Join(out, "api/nodes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(idx), `"shards"`) || !strings.Contains(string(idx), "/api/nodes/searching.json") {
+		t.Errorf("api/nodes.json does not list the shard of searching: %s", idx)
+	}
+	sh, err := os.ReadFile(filepath.Join(out, "api/nodes/searching.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(sh), `"slug":"binary-search"`) || !strings.Contains(string(sh), "/raw/main/") {
+		t.Errorf("the searching shard has no record of binary-search with its Markdown link")
+	}
+	page, _ := os.ReadFile(filepath.Join(out, "binary-search/index.html"))
+	if strings.Contains(string(page), `href="/binary-search.md"`) {
+		t.Error("the node page links the old Markdown copy")
+	}
+}
