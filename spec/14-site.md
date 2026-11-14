@@ -28,7 +28,7 @@ The node namespace is flat at the root of the site. Each node is at `/<slug>/`, 
 | `/<slug>/lean/` | the Lean part: spec, model, theorems and the highlighted module (14.7.7) |
 | `/<slug>/visualize/` | the full-window player (14.7.8) |
 | `/<slug>/tests/` | the contract and the shared cases, for a problem or an abstract type (14.7.3) |
-| `/<slug>.md` | the Markdown copy of a written node (14.8). The JSON record of each node is in `/api/nodes.json` |
+| `/<slug>.md` | not written. The **Markdown** link of a written node opens its `node.md` on GitHub (14.8). The JSON record of each node is in the shard of its area, listed in `/api/nodes.json` |
 | `/<slug>/<lang>.txt` | a redirect to `/<slug>/#code-<lang>`. The **Raw** link of a tab opens the file on GitHub |
 | `/embed/<slug>/` | the player alone, for an `<iframe>` in slides and course pages (14.7.8) |
 | `/t/<tag>` | the node by tag. Pages reads at most 2,000 rules from `_redirects`, and the tags are more, so `/api/moved.json` maps each tag and each alias to its node, and the 404 page sends the reader on |
@@ -408,10 +408,10 @@ Each page has copies for programs, as in math2:
 
 | Path | Content |
 |---|---|
-| `/<slug>.md` | the node as Markdown: the front matter, the body, the proofs, and the tier-1 code as fenced blocks |
-| `/<slug>.json` | after the move to R2 only. Until then, the record of each node is in `/api/nodes.json`: the front matter, the computed ladders, the edges in both directions, the list of implementations with their paths and levels, the scene and its presets |
+| `node.md` on GitHub | the node as Markdown, through the **Markdown** link of the page and the links of `/llms.txt`. The site writes no `/<slug>.md`, because one more file for each node takes the site over the file limit of Pages (14.9) |
+| `/<slug>.json` | after the move to R2 only. Until then, the record of each node is in the shard of its area (`/api/nodes/<area>.json`): the front matter, the computed ladders, the edges in both directions, the list of implementations with their paths and levels, the scene and its presets |
 | `/<slug>/<lang>.txt` | after the move to R2 only. Until then, the **Raw** link opens the file on GitHub |
-| `/api/nodes.json` | every node: tag, slug, kind, name, area, summary, levels. Sharded by kind when it passes 5 MB |
+| `/api/nodes.json` | the list of shards, one for each area: `/api/nodes/<area>.json` holds the record of every node of the area. One file with every node passed the limit of 25 MiB for each file at about 10,800 nodes |
 | `/api/graph.json` | every edge |
 | `/api/problems/<slug>/cases.jsonl` | the shared cases of a problem, so other projects can test their code |
 | `/api/coverage.json`, `/api/matrix.json` | the dashboards as data |
@@ -464,7 +464,7 @@ This does not fit one static deployment on any plan. The site uses the outlets o
 
 **The start.** Until the site has 19,500 files, it is one Cloudflare Pages project, `algorithm`, with the custom domain `algorithm.tamnd.com`. Pages takes at most 20,000 files and 25 MiB for each file. Each push to `main` deploys to production, and each pull request from the repository deploys a preview. The move to the Worker and R2 is an issue of M2, and the URLs do not change.
 
-**Fewer files on Pages.** The site passed 19,500 files at about 3,500 written nodes. Until the move to the Worker and R2, the site writes only the files that need their own URL: the node page, the Markdown copy of a written node, the Lean and visualize pages, the embeds, and the list pages. The node page already has the code of each language and every proof, so the language pages, the proof pages and the `.txt` copies are redirects to the parts of the node page. The JSON record of each node is in `/api/nodes.json`. The site has no `_worker.js`: a Pages Function counts against the daily limit of the free plan, and when that limit is used up, Pages serves only the static files. With every node written, the tree has about 17,500 files.
+**Fewer files on Pages.** The site passed 19,500 files at about 3,500 written nodes. Until the move to the Worker and R2, the site writes only the files that need their own URL: the node page, the Lean and visualize pages, the embeds, and the list pages. The node page already has the code of each language and every proof, so the language pages, the proof pages and the `.txt` copies are redirects to the parts of the node page. The JSON record of each node is in the shard of its area, and the Markdown link opens `node.md` on GitHub: a Markdown copy for each node took the site to 19,871 files at about 10,800 nodes. The site has no `_worker.js`: a Pages Function counts against the daily limit of the free plan, and when that limit is used up, Pages serves only the static files. With about 10,800 nodes, the tree has about 11,000 files.
 
 `registers/site-tiers.yaml` says which files go to the assets, and `algo site check` fails when the assets pass 95,000 files or a file passes 25 MiB.
 
@@ -557,7 +557,7 @@ The target is WCAG 2.2 level AA on every page.
 
 - **Titles.** Node pages: "Merge sort: algorithm, proof and code · algorithm". Language pages: "Merge sort in Rust · algorithm". Problem pages: "Sorting: the problem and every algorithm for it · algorithm".
 - **Descriptions** come from `summary`, at most 160 characters.
-- **Canonical** links on every page. The `.md` copies are not indexed (`X-Robots-Tag: noindex` on them).
+- **Canonical** links on every page. The site has no `.md` copies to index.
 - **Structured data** (JSON-LD): `TechArticle` for node pages, with `about`, `author` (people and, for agent text, the project as the publisher), `dateModified` and `isPartOf`; `SoftwareSourceCode` for language pages, with `programmingLanguage`, `codeRepository` and `license`; `BreadcrumbList` for the breadcrumb; `Course` for courses; `Person` for people; `Dataset` for `/api/`.
 - **Sitemaps**: `/sitemap.xml` is an index of sitemaps by kind and by language, each under 50,000 URLs, with `lastmod` from the provenance log.
 - **Social images**: one 1200 × 630 JPEG per node page, made by the build: the name, the kind, the area hue, the bound, and a frame of the scene when the node has one (10.7). Language pages reuse the image of their node with the language name added.

@@ -604,41 +604,62 @@ func splitTitle(src string) (string, string) {
 	return "Specification", src
 }
 
-// machine writes the copies for programs: /<slug>.md, /<slug>.json, /api/nodes.json and /llms.txt (spec 14.2).
+// machine writes the copies for programs: /api/nodes.json, one shard of node records for each area, and /llms.txt (spec 14.8).
+// The Markdown of a written node is its node.md on GitHub. The site writes no file for each node beyond its page, so that it stays under the file limit of Pages.
 func (b *builder) machine() error {
 	type apiNode struct {
 		node.Front
-		URL    string        `json:"url"`
-		Path   string        `json:"path"`
-		Status status.Status `json:"status"`
-		Langs  []string      `json:"langs,omitempty"`
-		Proofs []string      `json:"proofs,omitempty"`
-		Scene  bool          `json:"scene"`
+		URL      string        `json:"url"`
+		Path     string        `json:"path"`
+		Markdown string        `json:"markdown,omitempty"`
+		Status   status.Status `json:"status"`
+		Langs    []string      `json:"langs,omitempty"`
+		Proofs   []string      `json:"proofs,omitempty"`
+		Scene    bool          `json:"scene"`
 	}
-	var all []apiNode
+	type shard struct {
+		Area  string `json:"area"`
+		URL   string `json:"url"`
+		Nodes int    `json:"nodes"`
+	}
+	byArea := map[string][]apiNode{}
+	var areas []string
 	var llms strings.Builder
-	fmt.Fprintf(&llms, "# Algorithm\n\n> Algorithms and data structures, explained in plain words, proved by hand and in Lean, implemented and tested in many languages, and shown step by step.\n\nEach written page has a Markdown copy at /<slug>.md. The JSON record of every page is in /api/nodes.json. The text is CC BY-SA 4.0. The code is MIT.\n")
+	fmt.Fprintf(&llms, "# Algorithm\n\n> Algorithms and data structures, explained in plain words, proved by hand and in Lean, implemented and tested in many languages, and shown step by step.\n\nThe Markdown of each written page is its node.md on GitHub, linked below. /api/nodes.json lists one JSON file for each area, and each file has the record of every page of the area. The text is CC BY-SA 4.0. The code is MIT.\n")
 	groups := map[string][]*node.Node{}
 	for _, n := range b.c.Nodes {
 		a := apiNode{Front: n.Front, URL: b.opt.BaseURL + "/" + n.Slug + "/", Path: n.Rel, Status: b.status[n.Slug], Scene: n.Scene != ""}
+		if !isStub(n) {
+			a.Markdown = b.rawMarkdown(n)
+		}
 		for _, im := range n.Impls {
 			a.Langs = append(a.Langs, im.Lang)
 		}
 		for _, pr := range n.Proofs {
 			a.Proofs = append(a.Proofs, pr.ID)
 		}
-		all = append(all, a)
-		groups[n.Kind] = append(groups[n.Kind], n)
-		if isStub(n) {
-			continue
+		top, _, _ := strings.Cut(n.Area, "/")
+		if top == "" {
+			top = "other"
 		}
-		md, err := os.ReadFile(filepath.Join(n.Dir, "node.md"))
+		if _, ok := byArea[top]; !ok {
+			areas = append(areas, top)
+		}
+		byArea[top] = append(byArea[top], a)
+		groups[n.Kind] = append(groups[n.Kind], n)
+	}
+	sort.Strings(areas)
+	var shards []shard
+	for _, ar := range areas {
+		path := "/api/nodes/" + ar + ".json"
+		data, err := json.Marshal(map[string]any{"v": 2, "commit": b.opt.Commit, "area": ar, "nodes": byArea[ar]})
 		if err != nil {
 			return err
 		}
-		if err := b.write("/"+n.Slug+".md", md); err != nil {
+		if err := b.write(path, data); err != nil {
 			return err
 		}
+		shards = append(shards, shard{Area: ar, URL: b.opt.BaseURL + path, Nodes: len(byArea[ar])})
 	}
 	for _, k := range kindOrder {
 		ns := groups[k]
@@ -652,10 +673,10 @@ func (b *builder) machine() error {
 				fmt.Fprintf(&llms, "- [%s](%s/%s/): %s\n", n.Name, b.opt.BaseURL, n.Slug, n.Summary)
 				continue
 			}
-			fmt.Fprintf(&llms, "- [%s](%s/%s.md): %s\n", n.Name, b.opt.BaseURL, n.Slug, n.Summary)
+			fmt.Fprintf(&llms, "- [%s](%s): %s\n", n.Name, b.rawMarkdown(n), n.Summary)
 		}
 	}
-	data, err := json.Marshal(map[string]any{"v": 1, "commit": b.opt.Commit, "nodes": all})
+	data, err := json.Marshal(map[string]any{"v": 2, "commit": b.opt.Commit, "shards": shards})
 	if err != nil {
 		return err
 	}
